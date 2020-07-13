@@ -16,10 +16,13 @@ const (
 	AttrPAYLOAD = iota // payload
 )
 const (
-	MaxSeqN = 1<<31 - 1
-	MinSeqN = 0
-	MaxAckN = 1<<31 - 1
-	MinAckN = 0
+	MaxSeqN       = 1<<31 - 1
+	MinSeqN       = 0
+	MaxAckN       = 1<<31 - 1
+	MinAckN       = 0
+	//MaxWinSize    = 1<<16 - 1
+	MaxWinSize    = 10
+	NormalWinSize = 5
 )
 
 type Header interface {
