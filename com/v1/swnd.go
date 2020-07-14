@@ -51,8 +51,15 @@ type data struct {
 
 func (s *SWND) String() string {
 	s.init()
-	ds, _ := json.Marshal(s.ds)
-	return fmt.Sprintf("ds is : %v , lar is : %v , lfs is : %v ,sws is : %v , mss is : %v !", string(ds), s.lar, s.lfs, s.sws, s.mss)
+	dsm := make([]map[string]interface{}, 0)
+	for _, d := range s.ds {
+		dsm = append(dsm, map[string]interface{}{
+			"seq": d.seq,
+			"b":   d.b,
+		})
+	}
+	dsms, _ := json.Marshal(dsm)
+	return fmt.Sprintf("ds is : %v , lar is : %v , lfs is : %v ,sws is : %v , mss is : %v !", string(dsms), s.lar, s.lfs, s.sws, s.mss)
 }
 func (s *SWND) Write(bs []byte) {
 	s.init()
@@ -167,7 +174,9 @@ func (s *SWND) recvAck() {
 						// move lar
 						if d.seq == ackN {
 							log.Println("slide window lar to", index)
-							s.lar = int32(index)
+							s.ds = s.ds[index+1:]
+							s.lfs = s.lfs - int32(index) - 1
+							s.lar = -1
 						}
 						return true
 					})
@@ -201,7 +210,18 @@ func (s *SWND) sendWindow() {
 	}()
 }
 func (s *SWND) illegalAck(ackN uint16) (yes bool) {
-	return int32(ackN) > s.lfs || int32(ackN) <= s.lar
+	index := s.getAckNIndex(ackN)
+	return int32(index) > s.lfs || int32(index) <= s.lar
+}
+func (s *SWND) getAckNIndex(ackN uint16) (index uint16) {
+	s.rangeWindow(func(i uint16, d *data) (cti bool) {
+		if d.seq == ackN {
+			index = i
+			return false
+		}
+		return true
+	})
+	return index
 }
 func (s *SWND) notSendNum() (num uint16) {
 	return s.sws - s.notAckNum()
