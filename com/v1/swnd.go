@@ -55,7 +55,7 @@ func (s *SWND) String() string {
 	for _, d := range s.ds {
 		dsm = append(dsm, map[string]interface{}{
 			"seq": d.seq,
-			"b":   d.b,
+			"b":   string(d.b),
 		})
 	}
 	dsms, _ := json.Marshal(dsm)

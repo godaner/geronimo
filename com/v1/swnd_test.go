@@ -24,8 +24,12 @@ func TestSWND_Write(t *testing.T) {
 			time.Sleep(3*time.Second)
 		}
 	}()
-	swnd.Write([]byte("abcdefghij"))
-	swnd.Write([]byte("klmnopqrst"))
+	swnd.Write([]byte("wosi"))
+	go func() {
+		time.Sleep(1*time.Second)
+		swnd.Write([]byte("abcdefghij"))
+		swnd.Write([]byte("klmnopqrst"))
+	}()
 
 	time.Sleep(3*time.Second)
 	swnd.Ack(6)
