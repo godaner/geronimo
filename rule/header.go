@@ -28,7 +28,7 @@ const (
 	//MaxWinSize    = 1<<16 - 1
 	MaxWinSize = MaxSeqN
 	MinWinSize = 2
-	DefWinSize = 1600 // main
+	DefWinSize = 8 // main !!!!!!!!
 )
 const (
 	MSS = DefWinSize / 4
