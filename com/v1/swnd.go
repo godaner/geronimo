@@ -1,7 +1,6 @@
 package v1
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/godaner/geronimo/rule"
 	"log"
@@ -20,13 +19,18 @@ import (
 // seq = 0         1         2      3       4       5          0         1        2        3         4
 //
 // index=0         1         2      3       4       5          6         7        8        9         10
+const (
+	windowHead = "window_head"
+)
+
 type WriterCallBack func(bs []byte) (err error)
 
 // SWND
 //  send window
 type SWND struct {
 	// status
-	ds     []*data
+	//ds     []*data
+	ds     *ArrayList
 	sws    uint16 // send window size
 	mss    uint16 // mss
 	lar    int32  // last ack received
@@ -41,6 +45,7 @@ type SWND struct {
 	ackSignal        chan uint16
 	ackChannel       *sync.Map // map[uint16]chan uint16
 	sync.Once
+	winLock sync.RWMutex // lock the win
 }
 
 // data
@@ -49,22 +54,16 @@ type data struct {
 	seq uint16
 }
 
+func (d *data) String() string {
+	return fmt.Sprintf("{%v:%v}", d.seq, string(d.b))
+}
 func (s *SWND) String() string {
 	s.init()
-	dsm := make([]map[string]interface{}, 0)
-	for _, d := range s.ds {
-		dsm = append(dsm, map[string]interface{}{
-			"seq": d.seq,
-			"b":   string(d.b),
-		})
-	}
-	dsms, _ := json.Marshal(dsm)
-	return fmt.Sprintf("ds is : %v , lar is : %v , lfs is : %v ,sws is : %v , mss is : %v !", string(dsms), s.lar, s.lfs, s.sws, s.mss)
+	return fmt.Sprintf("ds is : %v , lar is : %v , lfs is : %v ,sws is : %v , mss is : %v !", s.ds.String(), s.lar, s.lfs, s.sws, s.mss)
 }
 func (s *SWND) Write(bs []byte) {
 	s.init()
-	ds := s.bytes2datas(bs)
-	s.ds = append(s.ds, ds...)
+	s.ds.Append(s.bytes2dataInfs(bs)...)
 	s.sendWindowSignal <- true
 }
 func (s *SWND) SetSWS(sws uint16) {
@@ -85,9 +84,12 @@ func (s *SWND) init() {
 		s.mss = rule.MSS
 		s.maxSeq = rule.MaxSeqN
 		s.minSeq = rule.MinSeqN
-		s.lar = -1
-		s.lfs = -1
-		s.ds = make([]*data, 0)
+		s.cSeq = s.minSeq
+		s.lar = 0
+		s.lfs = 0
+		s.ds = &ArrayList{}
+		s.ds.Append(windowHead) // for lar , lfs
+		//s.ds = make([]*data, 0)
 		s.ackChannel = &sync.Map{}
 		s.sendWindowSignal = make(chan bool)
 		s.ackSignal = make(chan uint16)
@@ -104,10 +106,10 @@ func (s *SWND) incSeq(seq *uint16, step uint16) {
 // readWindowSegment
 //  split window data to segment by mss
 func (s *SWND) readWindowSegment() (seqNs []uint16) {
-	start := int(s.lfs + 1)
-	for i := start; i-start+1 <= int(s.mss) && i < len(s.ds) && s.notAckNum() < s.sws; i++ {
-		seqNs = append(seqNs, s.ds[i].seq)
-	}
+	s.rangeNotSendWindow(func(index uint16, d *data) (cti bool) {
+		seqNs = append(seqNs, d.seq)
+		return true
+	})
 	return seqNs
 }
 
@@ -115,22 +117,33 @@ type rangeCallBack func(index uint16, d *data) (cti bool)
 
 // rangeWindow
 func (s *SWND) rangeWindow(f rangeCallBack) {
-	for i := s.lar + 1; i <= int32(s.lns()) && i < int32(len(s.ds)); i++ {
-		cti := f(uint16(i), s.ds[i])
-		if !cti {
-			return
+	s.ds.RangeWithStart(func(index uint32, d interface{}) (cti bool) {
+		if !(int32(index) <= int32(s.lns()) && int32(index) < int32(s.ds.Len())) {
+			return false
 		}
-	}
+		return f(uint16(index), d.(*data))
+	}, uint32(s.lar+1))
 }
 
-// rangeWindow
+// rangeWindowNotAck
 func (s *SWND) rangeWindowNotAck(f rangeCallBack) {
-	for i := s.lar + 1; i <= s.lfs; i++ {
-		cti := f(uint16(i), s.ds[i])
-		if !cti {
-			return
+	s.ds.RangeWithStart(func(index uint32, d interface{}) (cti bool) {
+		if !(int32(index) <= s.lfs) {
+			return false
 		}
-	}
+		return f(uint16(index), d.(*data))
+	}, uint32(s.lar+1))
+}
+
+// rangeNotSendWindow
+func (s *SWND) rangeNotSendWindow(f rangeCallBack) {
+	start := s.lfs + 1
+	s.ds.RangeWithStart(func(index uint32, d interface{}) (cti bool) {
+		if !(index-uint32(start)+1 <= uint32(s.mss) && index < s.ds.Len() && s.notAckNum() < s.sws) {
+			return false
+		}
+		return f(uint16(index), d.(*data))
+	}, uint32(start))
 }
 
 // containUint16
@@ -150,6 +163,8 @@ func (s *SWND) recvAck() {
 			select {
 			case ackN := <-s.ackSignal:
 				func() {
+					s.winLock.Lock()
+					defer s.winLock.Unlock()
 					log.Println("ackN is", ackN)
 					ackN = ackN - 1
 					if s.illegalAck(ackN) {
@@ -157,6 +172,8 @@ func (s *SWND) recvAck() {
 					}
 					log.Println("ackN2 is", ackN)
 					// slide windows
+					acNIndex := uint32(0)
+					var acNData *data
 					s.rangeWindow(func(index uint16, d *data) (cti bool) {
 						if d.seq > ackN {
 							return false
@@ -171,15 +188,29 @@ func (s *SWND) recvAck() {
 								log.Println("cancel ack timeout", d.seq)
 							}
 						}
-						// move lar
 						if d.seq == ackN {
-							log.Println("slide window lar to", index)
-							s.ds = s.ds[index+1:]
-							s.lfs = s.lfs - int32(index) - 1
-							s.lar = -1
+							acNIndex = uint32(index)
+							acNData = d
+							return false
 						}
 						return true
 					})
+
+					// move pointer lar
+					if acNData != nil {
+						log.Println("slide window lar to", acNIndex)
+						//  0    1    2    3    4    5    6
+						// lar                      lfs
+						// ackN = 2
+
+						err := s.ds.KeepRight(acNIndex)
+						if err != nil {
+							log.Println("keep right window err", err)
+						}
+						s.lfs = s.lfs - int32(acNIndex)
+						s.lar = 0
+						s.ds.Set(0, windowHead)
+					}
 					s.sendWindowSignal <- true
 				}()
 			}
@@ -195,6 +226,8 @@ func (s *SWND) sendWindow() {
 			select {
 			case <-s.sendWindowSignal:
 				func() {
+					s.winLock.Lock()
+					defer s.winLock.Unlock()
 					for { // send segment one by one
 						seqNs := s.readWindowSegment()
 						if len(seqNs) <= 0 {
@@ -291,6 +324,19 @@ func (s *SWND) datasSeqNs(ds []*data) (seqNs []uint16) {
 // bytes2datas
 func (s *SWND) bytes2datas(bs []byte) (ds []*data) {
 	ds = make([]*data, 0)
+	for _, b := range bs {
+		ds = append(ds, &data{
+			b:   b,
+			seq: s.cSeq,
+		})
+		s.incSeq(&s.cSeq, 1)
+	}
+	return ds
+}
+
+// bytes2dataInfs
+func (s *SWND) bytes2dataInfs(bs []byte) (ds []interface{}) {
+	ds = make([]interface{}, 0)
 	for _, b := range bs {
 		ds = append(ds, &data{
 			b:   b,

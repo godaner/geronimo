@@ -18,7 +18,7 @@ const (
 const (
 	//MaxSeqN = 1<<31 - 1
 	MaxSeqN = DefWinSize * 2
-	MinSeqN = 0
+	MinSeqN = 1
 )
 const (
 	MaxAckN = MaxSeqN
@@ -28,7 +28,7 @@ const (
 	//MaxWinSize    = 1<<16 - 1
 	MaxWinSize = MaxSeqN
 	MinWinSize = 2
-	DefWinSize = 8
+	DefWinSize = 1600 // main
 )
 const (
 	MSS = DefWinSize / 4

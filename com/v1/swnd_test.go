@@ -19,26 +19,25 @@ func TestSWND_Write(t *testing.T) {
 	}
 
 	go func() {
-		for ; ;  {
+		for {
 			fmt.Println(swnd.String())
-			time.Sleep(3*time.Second)
+			time.Sleep(2 * time.Second)
 		}
 	}()
-	swnd.Write([]byte("wosi"))
+	//swnd.Write([]byte("wosi"))
 	go func() {
-		time.Sleep(1*time.Second)
+		time.Sleep(1 * time.Second)
 		swnd.Write([]byte("abcdefghij"))
 		swnd.Write([]byte("klmnopqrst"))
 	}()
 
-	time.Sleep(3*time.Second)
-	swnd.Ack(6)
+	time.Sleep(4 * time.Second)
+	swnd.Ack(9)
 	fmt.Println("ack1")
 
-	time.Sleep(5*time.Second)
-	swnd.Ack(10)
-	fmt.Println("ack2")
-
+	//time.Sleep(5 * time.Second)
+	//swnd.Ack(11)
+	//fmt.Println("ack2")
 
 	time.Sleep(1000 * time.Hour)
 }
