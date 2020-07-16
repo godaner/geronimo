@@ -9,7 +9,7 @@ type Message interface {
 	// op
 	SYN(seqN uint16)
 	SYNACK(seqN, ackN, winSize uint16)
-	ACK(seqN, ackN, winSize uint16)
+	ACK(seqN, winSize uint16)
 	FINACK(seqN, ackN, winSize uint16)
 	PAYLOAD(seqN uint16, payload []byte)
 	SCANWIN(seqN uint16)

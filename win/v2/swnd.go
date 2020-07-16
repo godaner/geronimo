@@ -49,7 +49,7 @@ type SWND struct {
 	ackSeqCache          *sync.Map // for slide head to right
 }
 
-// Write
+// Recv
 func (s *SWND) Write(bs []byte) {
 	s.init()
 	for _, b := range bs {
@@ -121,8 +121,8 @@ func (s *SWND) trimAck() {
 			select {
 			case <-s.trimAckSig:
 				f()
-			//case <-time.After(time.Duration(250) * time.Millisecond):
-			//	f()
+				//case <-time.After(time.Duration(250) * time.Millisecond):
+				//	f()
 			}
 		}
 	}()
@@ -136,6 +136,9 @@ func (s *SWND) send() {
 				return
 			}
 			bs := s.readSeg()
+			if len(bs) <= 0 {
+				return
+			}
 			// push to sent collection
 			firstSeq := s.tailSeq
 			seqs := make([]uint16, 0)
@@ -158,8 +161,8 @@ func (s *SWND) send() {
 			select {
 			case <-s.sendSig:
 				f()
-			//case <-time.After(time.Duration(250) * time.Millisecond):
-			//	f()
+				//case <-time.After(time.Duration(250) * time.Millisecond):
+				//	f()
 			}
 		}
 	}()

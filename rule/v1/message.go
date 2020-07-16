@@ -94,37 +94,37 @@ func (m *Message) Marshall() []byte {
 	var err error
 	err = binary.Write(buf, binary.BigEndian, m.Header.HSeqN)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.Write m.Header.HSeqN err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Recv m.Header.HSeqN err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HAckN)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.Write m.Header.HAckN err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Recv m.Header.HAckN err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HFlag)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.Write m.Header.HFlag err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Recv m.Header.HFlag err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HWinSize)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.Write m.Header.HWinSize err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Recv m.Header.HWinSize err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HAttrNum)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.Write m.Header.AttrNum err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Recv m.Header.AttrNum err , err is : %v !", err.Error())
 	}
 	for _, v := range m.Attr {
 		err = binary.Write(buf, binary.BigEndian, v.AT)
 		if err != nil {
-			log.Printf("Message#Marshall : binary.Write m.Header.AttrType err , err is : %v !", err.Error())
+			log.Printf("Message#Marshall : binary.Recv m.Header.AttrType err , err is : %v !", err.Error())
 		}
 		//be careful
 		err = binary.Write(buf, binary.BigEndian, v.AL+3)
 		if err != nil {
-			log.Printf("Message#Marshall : binary.Write m.Header.AttrLen err , err is : %v !", err.Error())
+			log.Printf("Message#Marshall : binary.Recv m.Header.AttrLen err , err is : %v !", err.Error())
 		}
 		err = binary.Write(buf, binary.BigEndian, v.AV)
 		if err != nil {
-			log.Printf("Message#Marshall : binary.Write m.Header.AttrStr err , err is : %v !", err.Error())
+			log.Printf("Message#Marshall : binary.Recv m.Header.AttrStr err , err is : %v !", err.Error())
 		}
 	}
 	return buf.Bytes()
@@ -185,8 +185,8 @@ func (m *Message) SYN(seqN uint16) {
 func (m *Message) SYNACK(seqN, ackN, winSize uint16) {
 	m.newMessage(rule.FlagSYN|rule.FlagACK, seqN, ackN, winSize)
 }
-func (m *Message) ACK(seqN, ackN, winSize uint16) {
-	m.newMessage(rule.FlagACK, seqN, ackN, winSize)
+func (m *Message) ACK(seqN, winSize uint16) {
+	m.newMessage(rule.FlagACK, 0, seqN, winSize)
 }
 func (m *Message) FINACK(seqN, ackN, winSize uint16) {
 	m.newMessage(rule.FlagFIN|rule.FlagACK, seqN, ackN, winSize)

@@ -12,10 +12,10 @@ import (
 // sws = 5
 // seq range = 0-5
 //                                       tailSeq
-//          head                          tail               fixedWinSize
+//          head                          tail                 fixedWinSize
 // list  <<--|-------|-------|------|-------|-------|-------|-------|--------|---------|---------|-----<< data flow
 //           |                              |                       |
-// consumed<=|==========>received<==========|=====>ready recv<===|=====>not allow recv
+// consumed<=|==========>received<==========|======>ready recv<=====|=====>not allow recv
 //           |                              |                       |
 // seq =     0       1       2      3       4       5       0       1        2         3         4
 //
@@ -81,8 +81,8 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 	return n, nil
 }
 
-// Write
-func (r *RWND) Write(seqN uint16, bs []byte) {
+// Recv
+func (r *RWND) Recv(seqN uint16, bs []byte) {
 	r.init()
 	for index, b := range bs {
 		r.readyRecv.Store(seqN, &rData{
