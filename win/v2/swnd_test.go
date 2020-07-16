@@ -10,6 +10,7 @@ import (
 
 func TestSWND_Write(t *testing.T) {
 	// DefWinSize = 8 !!!!
+	// mms = 2
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
 	swnd := SWND{
@@ -32,10 +33,12 @@ func TestSWND_Write(t *testing.T) {
 		swnd.Write([]byte("klmnopqrst"))
 	}()
 
-	time.Sleep(4 * time.Second)
-	swnd.Ack(9) // win = 9
+	time.Sleep(2 * time.Second)
+	swnd.Ack(2) // win = 9
 	fmt.Println("ack1")
-
+	time.Sleep(2 * time.Second)
+	swnd.Ack(4) // win = 9
+	fmt.Println("ack2")
 	//time.Sleep(5 * time.Second)
 	//swnd.Ack(11)
 	//fmt.Println("ack2")

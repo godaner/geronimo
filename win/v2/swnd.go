@@ -41,10 +41,12 @@ type SWND struct {
 	// helper
 	sync.Once
 	sendSig              chan bool // start send data to the list
+	trimAckSig           chan bool // trim ack data
 	readySend            *datastruct.ByteBlockChan
-	segResendCancel      *sync.Map
-	segResendImmediately *sync.Map
-	ackNum               *sync.Map
+	segResendCancel      *sync.Map // for cancel resend
+	segResendImmediately *sync.Map // for resend
+	ackNum               *sync.Map // for quick resend
+	ackSeqCache          *sync.Map // for slide head to right
 }
 
 // Write
@@ -87,43 +89,77 @@ func (s *SWND) init() {
 		s.headSeq = s.tailSeq
 		s.sent = &datastruct.ByteBlockChan{Size: rule.MaxWinSize}
 		s.sendSig = make(chan bool)
+		s.trimAckSig = make(chan bool)
 		s.readySend = &datastruct.ByteBlockChan{Size: rule.MaxWinSize}
 		s.segResendCancel = &sync.Map{}
 		s.segResendImmediately = &sync.Map{}
 		s.ackNum = &sync.Map{}
+		s.ackSeqCache = &sync.Map{}
 		s.send()
+		s.trimAck()
 	})
+}
+
+// trimAck
+func (s *SWND) trimAck() {
+	f := func() {
+		defer func() {
+			s.sendSig <- true
+		}()
+		for {
+			d, _ := s.ackSeqCache.Load(s.headSeq)
+			if d == nil {
+				return
+			}
+			s.sent.BlockPop()
+			s.ackSeqCache.Delete(s.headSeq)
+			s.incSeq(&s.headSeq, 1)
+		}
+	}
+	go func() {
+		for {
+			select {
+			case <-s.trimAckSig:
+				f()
+			//case <-time.After(time.Duration(250) * time.Millisecond):
+			//	f()
+			}
+		}
+	}()
 }
 
 // send
 func (s *SWND) send() {
+	f := func() {
+		for {
+			if !s.sendAble() {
+				return
+			}
+			bs := s.readSeg()
+			// push to sent collection
+			firstSeq := s.tailSeq
+			seqs := make([]uint16, 0)
+			for _, b := range bs {
+				s.sent.Push(b)
+				seqs = append(seqs, s.tailSeq)
+				s.incSeq(&s.tailSeq, 1)
+			}
+			// set segment timeout
+			s.setSegResend(seqs, bs)
+			// write
+			err := s.WriterCallBack(firstSeq, bs)
+			if err != nil {
+				log.Println("writer call back err , err is", err.Error())
+			}
+		}
+	}
 	go func() {
 		for {
 			select {
 			case <-s.sendSig:
-				func() {
-					for {
-						if !s.sendAble() {
-							return
-						}
-						bs := s.readSeg()
-						// push to sent collection
-						firstSeq := s.tailSeq
-						seqs := make([]uint16, 0)
-						for _, b := range bs {
-							s.sent.Push(b)
-							seqs = append(seqs, s.tailSeq)
-							s.incSeq(&s.tailSeq, 1)
-						}
-						// set segment timeout
-						s.setSegResend(seqs, bs)
-						// write
-						err := s.WriterCallBack(firstSeq, bs)
-						if err != nil {
-							log.Println("writer call back err , err is", err.Error())
-						}
-					}
-				}()
+				f()
+			//case <-time.After(time.Duration(250) * time.Millisecond):
+			//	f()
 			}
 		}
 	}()
@@ -131,7 +167,7 @@ func (s *SWND) send() {
 
 // sendAble
 func (s *SWND) sendAble() (yes bool) {
-	return s.sent.Len()+s.readySend.Len() < uint32(s.currSendWinSize)
+	return s.sent.Len() < uint32(s.currSendWinSize)
 }
 
 // readSeg
@@ -168,7 +204,16 @@ func (s *SWND) setSegResend(seqs []uint16, bs []byte) {
 	reSendImmediately := make(chan bool, 1)
 	s.segResendCancel.Store(lastSeq, reSendCancel)
 	s.segResendImmediately.Store(lastSeq, reSendImmediately)
+
 	go func() {
+		defer func() {
+			s.segResendCancel.Delete(lastSeq)
+			s.segResendImmediately.Delete(lastSeq)
+			for _, seq := range seqs {
+				s.ackSeqCache.Store(seq, true)
+			}
+			s.trimAckSig <- true
+		}()
 		for {
 			select {
 			case <-t.C:
@@ -196,7 +241,7 @@ func (s *SWND) setSegResend(seqs []uint16, bs []byte) {
 // rto
 //  retry time out
 func (s *SWND) rto() uint16 {
-	return 200
+	return 500
 }
 
 // quickResend
@@ -204,12 +249,18 @@ func (s *SWND) quickResend(ack uint16) (match bool) {
 	zero := uint8(0)
 	numI, _ := s.ackNum.LoadOrStore(ack, &zero)
 	num := numI.(*uint8)
+	*num++
 	if *num < quickResendIfAckGEN {
 		return false
 	}
 	ci, _ := s.segResendImmediately.Load(ack)
+	if ci == nil { // not data wait to send
+		*num = 0
+		return false
+	}
 	c := ci.(chan bool)
 	c <- true
+	*num = 0
 	return true
 }
 
