@@ -7,7 +7,7 @@ import (
 )
 
 func TestRWND_ReadFull(t *testing.T) {
-	// DefWinSize = 8
+	// DefWinSize = 8 !!!!
 	rwnd := &RWND{
 		AckCallBack: func(ack, receiveWinSize uint16) (err error) {
 			fmt.Println(ack, receiveWinSize)
@@ -28,5 +28,9 @@ func TestRWND_ReadFull(t *testing.T) {
 	rwnd.Write(8, []byte("zhan"))
 	time.Sleep(1 * time.Second)
 	rwnd.Write(12, []byte("6666"))
+	time.Sleep(1 * time.Second)
+	rwnd.Write(0, []byte("7777"))
+	time.Sleep(1 * time.Second)
+	rwnd.Write(4, []byte("8888"))
 	time.Sleep(1000 * time.Second)
 }

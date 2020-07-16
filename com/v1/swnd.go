@@ -2,6 +2,7 @@ package v1
 
 import (
 	"fmt"
+	"github.com/godaner/geronimo/com/datastruct"
 	"github.com/godaner/geronimo/rule"
 	"log"
 	"sync"
@@ -33,7 +34,7 @@ type WriterCallBack func(firstSeq uint16, bs []byte) (err error)
 type SWND struct {
 	// status
 	//ds     []*sData
-	ds     *ArrayList
+	ds     *datastruct.ArrayList
 	sws    uint16 // send window size
 	mss    uint16 // mss
 	lar    int32  // last ack received
@@ -90,7 +91,7 @@ func (s *SWND) init() {
 		s.cSeq = s.minSeq
 		s.lar = 0
 		s.lfs = 0
-		s.ds = &ArrayList{}
+		s.ds = &datastruct.ArrayList{}
 		s.ds.Append(windowHead) // for lar , lfs
 		//s.ds = make([]*sData, 0)
 		s.ackChannel = &sync.Map{}

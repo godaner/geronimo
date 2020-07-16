@@ -1,4 +1,4 @@
-package v1
+package datastruct
 
 import "sync"
 
@@ -6,14 +6,14 @@ const (
 	defSize = 65535
 )
 
-type byteBlockChan struct {
+type ByteBlockChan struct {
 	len  uint32
 	c    chan byte
 	Size uint32
 	sync.Once
 }
 
-func (b *byteBlockChan) init() {
+func (b *ByteBlockChan) init() {
 	b.Do(func() {
 		if b.Size <= 0 {
 			b.Size = defSize
@@ -21,18 +21,18 @@ func (b *byteBlockChan) init() {
 		b.c = make(chan byte, b.Size)
 	})
 }
-func (b *byteBlockChan) Len() uint32 {
+func (b *ByteBlockChan) Len() uint32 {
 	b.init()
 	return b.len
 }
-func (b *byteBlockChan) Pop() (byt byte, len uint32) {
+func (b *ByteBlockChan) Pop() (byt byte, len uint32) {
 	b.init()
 	byt = <-b.c
 	b.len--
 	return byt, b.len
 }
 
-func (b *byteBlockChan) Push(byt byte) (len uint32) {
+func (b *ByteBlockChan) Push(byt byte) (len uint32) {
 	b.init()
 	b.c <- byt
 	b.len++

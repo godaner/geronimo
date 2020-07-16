@@ -2,6 +2,7 @@ package v1
 
 import (
 	"fmt"
+	"github.com/godaner/geronimo/com/datastruct"
 	"github.com/godaner/geronimo/rule"
 	"log"
 	"sync"
@@ -14,7 +15,7 @@ import (
 //          head                          tail                     rws
 // list  <<--|-------|-------|------|-------|-------|-------|-------|--------|---------|---------|-----<< data flow
 //           |                              |                       |
-// consumed<=|==========>received<==========|=====>ready receive<===|=====>not allow receive
+// consumed<=|==========>received<==========|=====>ready recv<===|=====>not allow recv
 //           |                              |                       |
 // seq =     0       1       2      3       4       5       0       1        2         3         4
 //
@@ -23,11 +24,11 @@ import (
 type AckCallBack func(ack, receiveWinSize uint16) (err error)
 
 // RWND
-//  receive window
+//  recv window
 type RWND struct {
 	// status
-	recved           *byteBlockChan
-	fixedRecvWinSize uint16 // fixed receive window size
+	recved           *datastruct.ByteBlockChan
+	fixedRecvWinSize uint16 // fixed recv window size
 	mss              uint16 // mss
 	maxSeq           uint16 // max seq
 	minSeq           uint16 // min seq
@@ -36,7 +37,7 @@ type RWND struct {
 	AckCallBack AckCallBack
 	// helper
 	sync.Once
-	recvSig   chan bool // start receive data to the list
+	recvSig   chan bool // start recv data to the list
 	readyRecv *sync.Map
 }
 
@@ -52,7 +53,7 @@ func (r *rData) String() string {
 	return fmt.Sprintf("{%v:%v}", r.seq, string(r.b))
 }
 
-// Read
+// ReadFull
 func (r *RWND) ReadFull(bs []byte) (n int, err error) {
 	r.init()
 	for i := 0; i < len(bs); i++ {
@@ -88,15 +89,15 @@ func (r *RWND) init() {
 		r.maxSeq = rule.MaxSeqN
 		r.minSeq = rule.MinSeqN
 		r.cSeq = r.minSeq
-		r.recved = &byteBlockChan{Size: rule.MaxWinSize}
+		r.recved = &datastruct.ByteBlockChan{Size: rule.MaxWinSize}
 		r.recvSig = make(chan bool)
 		r.readyRecv = &sync.Map{}
-		r.receive()
+		r.recv()
 	})
 }
 
-// receive
-func (r *RWND) receive() {
+// recv
+func (r *RWND) recv() {
 	go func() {
 		for {
 			select {
@@ -119,16 +120,16 @@ func (r *RWND) receive() {
 						d := di.(*rData)
 						// clear seq cache
 						r.readyRecv.Delete(r.cSeq)
-						// put data to received
-						r.recved.Push(d.b)
 						// slide window , next seq
 						r.incSeq(&r.cSeq, 1)
-						if d.needAck {
+						if d.needAck { // ack before put data
 							err := r.AckCallBack(r.cSeq, r.receiveWinSize())
 							if err != nil {
 								log.Println("need ack , ack callback err , err is", err.Error())
 							}
 						}
+						// put data to received , maybe block , so put it at the end
+						r.recved.Push(d.b)
 					}
 				}()
 			}
