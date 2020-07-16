@@ -2,12 +2,16 @@ package v1
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"testing"
 	"time"
 )
 
 func TestRWND_ReadFull(t *testing.T) {
 	// DefWinSize = 8 !!!!
+	devNull, _ := os.Open(os.DevNull)
+	log.SetOutput(devNull)
 	rwnd := &RWND{
 		AckCallBack: func(ack, receiveWinSize uint16) (err error) {
 			fmt.Println(ack, receiveWinSize)
@@ -17,8 +21,9 @@ func TestRWND_ReadFull(t *testing.T) {
 	go func() {
 		bs := make([]byte, 8)
 		for ; ;  {
-			rwnd.ReadFull(bs)
-			fmt.Println(string(bs))
+			//n,_:=rwnd.Read(bs)
+			n,_:=rwnd.ReadFull(bs)
+			fmt.Println(string(bs),n)
 		}
 	}()
 	rwnd.Write(4, []byte("dasb"))

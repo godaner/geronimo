@@ -2,8 +2,8 @@ package v1
 
 import (
 	"fmt"
-	"github.com/godaner/geronimo/com/datastruct"
 	"github.com/godaner/geronimo/rule"
+	"github.com/godaner/geronimo/win/datastruct"
 	"log"
 	"sync"
 	"time"

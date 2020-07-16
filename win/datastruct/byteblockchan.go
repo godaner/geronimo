@@ -21,17 +21,35 @@ func (b *ByteBlockChan) init() {
 		b.c = make(chan byte, b.Size)
 	})
 }
+
+// Len
 func (b *ByteBlockChan) Len() uint32 {
 	b.init()
 	return b.len
 }
-func (b *ByteBlockChan) Pop() (byt byte, len uint32) {
+
+// Pop
+//  not block
+func (b *ByteBlockChan) Pop() (usable bool, byt byte, len uint32) {
+	b.init()
+	select {
+	case byt = <-b.c:
+		b.len--
+		return true, byt, b.len
+	default:
+		return
+	}
+}
+
+// BlockPop
+func (b *ByteBlockChan) BlockPop() (byt byte, len uint32) {
 	b.init()
 	byt = <-b.c
 	b.len--
 	return byt, b.len
 }
 
+// Push
 func (b *ByteBlockChan) Push(byt byte) (len uint32) {
 	b.init()
 	b.c <- byt
