@@ -16,19 +16,18 @@ const (
 	AttrPAYLOAD = iota // payload
 )
 const (
-	//MaxSeqN = 1<<31 - 1
 	MaxSeqN = DefWinSize * 2
-	MinSeqN = 1
+	MinSeqN = 0
 )
 const (
 	MaxAckN = MaxSeqN
 	MinAckN = MinSeqN
 )
 const (
-	//MaxWinSize    = 1<<16 - 1
 	MaxWinSize = MaxSeqN
 	MinWinSize = 2
-	DefWinSize = 8 // main !!!!!!!!
+	//DefWinSize = 4096 // main !!!!!!!!
+	DefWinSize = 8 // for test
 )
 const (
 	MSS = DefWinSize / 4

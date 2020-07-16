@@ -60,6 +60,26 @@ func (a *ArrayList) KeepRight(l uint32) (err error) {
 	return nil
 }
 
+// KeepRightRetLeft
+//  arr[l:)
+func (a *ArrayList) KeepRightRetLeft(l uint32) (left *ArrayList, err error) {
+	a.Lock()
+	defer a.Unlock()
+	lastIndex := a.LastIndex()
+	if l < 0 || l > a.Len() {
+		return nil, errors.New(fmt.Sprintf("l is out of range , l is : %v , list range is : [0,%v]", l, lastIndex))
+	}
+	// 0 1 2 3
+	// l=4
+	lef := a.l[:l]
+	if l >= a.Len() {
+		a.l = []interface{}{}
+	} else {
+		a.l = a.l[l:]
+	}
+	return &ArrayList{l: lef}, nil
+}
+
 // Range
 func (a *ArrayList) Range(f RangeCallBack) {
 	a.RLock()
