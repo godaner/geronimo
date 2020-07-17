@@ -33,7 +33,7 @@ func TestGConn_Read(t *testing.T) {
 	go func() {
 		for ; ;  {
 			c1.Write(s)
-			//time.Sleep(100*time.Millisecond)
+			//time.Sleep(200*time.Millisecond)
 		}
 	}()
 	go func() {

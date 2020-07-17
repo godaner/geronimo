@@ -47,6 +47,7 @@ type RWND struct {
 	readyRecvNum int64
 	ackWin       bool
 	tailSeqLock  sync.RWMutex
+	recvLock     sync.RWMutex
 }
 
 // rData
@@ -94,6 +95,8 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 // RecvSegment
 func (r *RWND) RecvSegment(seqN uint16, bs []byte) {
 	r.init()
+	r.recvLock.Lock()
+	defer r.recvLock.Unlock()
 	log.Println("RWND : recv seq is [", seqN, ",", seqN+uint16(len(bs))-1, "]")
 	rdI, _ := r.readyRecv.LoadOrStore(seqN, &rData{})
 	rd := rdI.(*rData)
@@ -112,7 +115,7 @@ func (r *RWND) RecvSegment(seqN uint16, bs []byte) {
 		rd.seq = seqN
 		rd.needAck = index == (len(bs) - 1)
 		rd.deled = false
-		r.incTailSeq(1)
+		r.incSeq(&seqN, 1)
 		atomic.AddInt64(&r.readyRecvNum, 1)
 	}
 	r.recvSig <- true
@@ -201,13 +204,19 @@ func (r *RWND) ack(tag string, ackN *uint16) {
 	}
 }
 
+// incSeq
+func (r *RWND) incSeq(seq *uint16, step uint16) {
+	*seq = (*seq+step)%r.maxSeq + r.minSeq
+}
+
 // incTailSeq
 func (r *RWND) incTailSeq(step uint16) (tailSeq uint16) {
 	r.tailSeqLock.Lock()
 	defer r.tailSeqLock.Unlock()
-	r.tailSeq = (r.tailSeq+step)%r.maxSeq + r.minSeq
+	r.incSeq(&r.tailSeq, step)
 	return r.tailSeq
 }
+
 // getTailSeq
 func (r *RWND) getTailSeq() (tailSeq uint16) {
 	r.tailSeqLock.RLock()

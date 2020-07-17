@@ -24,7 +24,7 @@ const (
 	quickResendIfAckGEN = 3
 )
 
-type WriterCallBack func(firstSeq uint16, bs []byte) (err error)
+type SendCallBack func(firstSeq uint16, bs []byte) (err error)
 
 type SWND struct {
 	// status
@@ -37,7 +37,7 @@ type SWND struct {
 	headSeq         uint16 // current head seq , location is head
 	tailSeq         uint16 // current tail seq , location is tail
 	// outer
-	SendCallBack WriterCallBack
+	SendCallBack SendCallBack
 	// helper
 	sync.Once
 	sendSig              chan bool // start send data to the list
@@ -237,11 +237,16 @@ func (s *SWND) sendAble() (yes bool) {
 	return sentLen < currSendWinSize
 }
 
+// incSeq
+func (s *SWND) incSeq(seq *uint16, step uint16) {
+	*seq = (*seq+step)%s.maxSeq + s.minSeq
+}
+
 // incTailSeq
 func (s *SWND) incTailSeq(step uint16) (tailSeq uint16) {
 	s.tailSeqLock.Lock()
 	defer s.tailSeqLock.Unlock()
-	s.tailSeq = (s.tailSeq+step)%s.maxSeq + s.minSeq
+	s.incSeq(&s.tailSeq, step)
 	return s.tailSeq
 }
 
@@ -256,7 +261,7 @@ func (s *SWND) getTailSeq() (tailSeq uint16) {
 func (s *SWND) incHeadSeq(step uint16) (headSeq uint16) {
 	s.headSeqLock.Lock()
 	defer s.headSeqLock.Unlock()
-	s.headSeq = (s.headSeq+step)%s.maxSeq + s.minSeq
+	s.incSeq(&s.headSeq, step)
 	return s.headSeq
 }
 
