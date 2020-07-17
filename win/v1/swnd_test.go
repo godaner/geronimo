@@ -24,7 +24,7 @@ func TestSWND_Write(t *testing.T) {
 			time.Sleep(2 * time.Second)
 		}
 	}()
-	//swnd.Recv([]byte("wosi"))
+	//swnd.RecvSegment([]byte("wosi"))
 	go func() {
 		time.Sleep(1 * time.Second)
 		swnd.Write([]byte("abcdefghij"))

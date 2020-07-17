@@ -55,12 +55,15 @@ func (g *GConn) init() {
 				m.UnMarshall(bs)
 
 				if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
-					g.recvWin.Recv(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
+					g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
+					continue
 				}
 				if m.Flag()&rule.FlagACK == rule.FlagACK {
 					g.sendWin.SetSendWinSize(m.WinSize())
 					g.sendWin.Ack(m.AckN())
+					continue
 				}
+				panic("no handler")
 			}
 
 		}()
