@@ -6,6 +6,7 @@ import (
 	"github.com/godaner/geronimo/win/datastruct"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -43,8 +44,9 @@ type RWND struct {
 	sync.Once
 	recvSig      chan bool // start recv data to the list
 	readyRecv    *sync.Map
-	readyRecvNum uint32
+	readyRecvNum int64
 	ackWin       bool
+	tailSeqLock  sync.RWMutex
 }
 
 // rData
@@ -110,8 +112,8 @@ func (r *RWND) RecvSegment(seqN uint16, bs []byte) {
 		rd.seq = seqN
 		rd.needAck = index == (len(bs) - 1)
 		rd.deled = false
-		r.incSeq(&seqN, 1)
-		r.readyRecvNum++
+		r.incTailSeq(1)
+		atomic.AddInt64(&r.readyRecvNum, 1)
 	}
 	r.recvSig <- true
 }
@@ -151,7 +153,8 @@ func (r *RWND) loopRecv() {
 				func() {
 					firstCycle := true // eg. if no firstCycle , cache have seq 9 , 9 ack will be sent twice
 					for {
-						di, _ := r.readyRecv.Load(r.tailSeq)
+						tailSeq := r.getTailSeq()
+						di, _ := r.readyRecv.Load(tailSeq)
 						if di == nil {
 							if !firstCycle {
 								return
@@ -162,10 +165,10 @@ func (r *RWND) loopRecv() {
 						firstCycle = false
 						d := di.(*rData)
 						// clear seq cache
-						r.readyRecv.Delete(r.tailSeq)
-						r.readyRecvNum--
+						r.readyRecv.Delete(tailSeq)
+						atomic.AddInt64(&r.readyRecvNum, -1)
 						// slide window , next seq
-						r.incSeq(&r.tailSeq, 1)
+						r.incTailSeq(1)
 						// put data to received
 						r.recved.Push(d.b)
 						// ack it
@@ -183,7 +186,8 @@ func (r *RWND) loopRecv() {
 // ack
 func (r *RWND) ack(tag string, ackN *uint16) {
 	if ackN == nil {
-		ackN = &r.tailSeq
+		a := r.getTailSeq()
+		ackN = &a
 	}
 	rws := r.recvWinSize()
 	log.Println("RWND : tag is ", tag, ", send ack , ack is", *ackN, " , win size is", rws)
@@ -197,9 +201,18 @@ func (r *RWND) ack(tag string, ackN *uint16) {
 	}
 }
 
-// incSeq
-func (r *RWND) incSeq(seq *uint16, step uint16) {
-	*seq = (*seq+step)%r.maxSeq + r.minSeq
+// incTailSeq
+func (r *RWND) incTailSeq(step uint16) (tailSeq uint16) {
+	r.tailSeqLock.Lock()
+	defer r.tailSeqLock.Unlock()
+	r.tailSeq = (r.tailSeq+step)%r.maxSeq + r.minSeq
+	return r.tailSeq
+}
+// getTailSeq
+func (r *RWND) getTailSeq() (tailSeq uint16) {
+	r.tailSeqLock.RLock()
+	defer r.tailSeqLock.RUnlock()
+	return r.tailSeq
 }
 
 // loopPrint

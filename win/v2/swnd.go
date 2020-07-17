@@ -47,6 +47,8 @@ type SWND struct {
 	segResendImmediately *sync.Map // for resend
 	ackNum               *sync.Map // for quick resend
 	ackSeqCache          *sync.Map // for slide head to right
+	tailSeqLock          sync.RWMutex
+	headSeqLock          sync.RWMutex
 }
 
 // RecvSegment
@@ -109,13 +111,14 @@ func (s *SWND) loopTrimAck() {
 			s.sendSig <- true
 		}()
 		for {
-			d, ok := s.ackSeqCache.Load(s.headSeq)
+			headSeq := s.getHeadSeq()
+			d, ok := s.ackSeqCache.Load(headSeq)
 			if !ok && d == nil {
 				return
 			}
 			s.sent.BlockPop()
-			s.ackSeqCache.Delete(s.headSeq)
-			s.incSeq(&s.headSeq, 1)
+			s.ackSeqCache.Delete(headSeq)
+			s.incHeadSeq(1)
 		}
 	}
 	go func() {
@@ -142,12 +145,12 @@ func (s *SWND) loopSend() {
 				return
 			}
 			// push to sent collection
-			firstSeq := s.tailSeq
+			firstSeq := s.getTailSeq()
 			seqs := make([]uint16, 0)
 			for _, b := range bs {
 				s.sent.Push(b)
-				seqs = append(seqs, s.tailSeq)
-				s.incSeq(&s.tailSeq, 1)
+				seqs = append(seqs, s.getTailSeq())
+				s.incTailSeq(1)
 			}
 			// set segment timeout
 			s.setSegResend(seqs, bs)
@@ -234,9 +237,34 @@ func (s *SWND) sendAble() (yes bool) {
 	return sentLen < currSendWinSize
 }
 
-// incSeq
-func (s *SWND) incSeq(seq *uint16, step uint16) {
-	*seq = (*seq+step)%s.maxSeq + s.minSeq
+// incTailSeq
+func (s *SWND) incTailSeq(step uint16) (tailSeq uint16) {
+	s.tailSeqLock.Lock()
+	defer s.tailSeqLock.Unlock()
+	s.tailSeq = (s.tailSeq+step)%s.maxSeq + s.minSeq
+	return s.tailSeq
+}
+
+// getTailSeq
+func (s *SWND) getTailSeq() (tailSeq uint16) {
+	s.tailSeqLock.RLock()
+	defer s.tailSeqLock.RUnlock()
+	return s.tailSeq
+}
+
+// incHeadSeq
+func (s *SWND) incHeadSeq(step uint16) (headSeq uint16) {
+	s.headSeqLock.Lock()
+	defer s.headSeqLock.Unlock()
+	s.headSeq = (s.headSeq+step)%s.maxSeq + s.minSeq
+	return s.headSeq
+}
+
+// getHeadSeq
+func (s *SWND) getHeadSeq() (headSeq uint16) {
+	s.headSeqLock.RLock()
+	defer s.headSeqLock.RUnlock()
+	return s.headSeq
 }
 
 // decSeq
@@ -249,7 +277,7 @@ func (s *SWND) decSeq(seq *uint16, step uint16) {
 // rto
 //  retry time out
 func (s *SWND) rto() uint16 {
-	return 1000
+	return 100
 }
 
 // quickResend

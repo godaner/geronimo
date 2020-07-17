@@ -26,9 +26,9 @@ const (
 const (
 	MaxWinSize = MaxSeqN
 	MinWinSize = 2
-	//DefWinSize = 4096 // main !!!!!!!!
+	DefWinSize = 4096 // main !!!!!!!!
 	//DefWinSize = 8 // for test
-	DefWinSize = 4 // for test
+	//DefWinSize = 4 // for test
 )
 const (
 	MSS = DefWinSize / 4
