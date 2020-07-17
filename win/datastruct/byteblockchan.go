@@ -5,7 +5,6 @@ import "sync"
 const (
 	defSize = 65535
 )
-
 type ByteBlockChan struct {
 	len  uint32
 	c    chan byte

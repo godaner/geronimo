@@ -3,12 +3,16 @@ package net
 import (
 	"fmt"
 	"io"
+	"log"
 	"net"
+	"os"
 	"testing"
 	"time"
 )
 
 func TestGConn_Read(t *testing.T) {
+	devNull, _ := os.Open(os.DevNull)
+	log.SetOutput(devNull)
 	c1,_:=Dial(&net.UDPAddr{
 		IP:   net.ParseIP("192.168.6.6"),
 		Port: 1111,
@@ -31,7 +35,7 @@ func TestGConn_Read(t *testing.T) {
 	go func() {
 		for ; ;  {
 			c1.Write(s)
-			time.Sleep(1*time.Second)
+			time.Sleep(10*time.Millisecond)
 		}
 	}()
 	go func() {

@@ -1,7 +1,6 @@
 package net
 
 import (
-	"encoding/binary"
 	"github.com/godaner/geronimo/rule"
 	v1 "github.com/godaner/geronimo/rule/v1"
 	v2 "github.com/godaner/geronimo/win/v2"
@@ -30,44 +29,26 @@ func (g *GConn) init() {
 				m := &v1.Message{}
 				m.ACK(ack, receiveWinSize)
 				b := m.Marshall()
-				length := make([]byte, 4, 4)
-				binary.BigEndian.PutUint32(length, uint32(len(b)))
-				//b = append(length, b...)
-				_, err = g.UDPConn.Write(length)
 				_, err = g.UDPConn.Write(b)
 				return err
 			},
 		}
 		g.sendWin = &v2.SWND{
-			WriterCallBack: func(firstSeq uint16, bs []byte) (err error) {
+			SendCallBack: func(firstSeq uint16, bs []byte) (err error) {
 				// send udp
 				m := &v1.Message{}
 				m.PAYLOAD(firstSeq, bs)
 				b := m.Marshall()
-				length := make([]byte, 4, 4)
-				binary.BigEndian.PutUint32(length, uint32(len(b)))
-				//b = append(length, b...)
-				_, err = g.UDPConn.Write(length)
 				_, err = g.UDPConn.Write(b)
 				return err
 			},
 		}
 		go func() {
 			// recv udp
-			l := make([]byte, 4, 4)
+			bs := make([]byte, 1500, 1500)
 			for {
-				//_,err:=io.ReadFull(g.UDPConn,l)
-				//_,err:=g.UDPConn.Read(l)
-				_,_,err:=g.UDPConn.ReadFrom(l)
-				if err!=nil{
-					panic(err)
-				}
-				length := binary.BigEndian.Uint32(l)
-				bs := make([]byte, length, length)
-				//_, err =io.ReadFull(g.UDPConn,bs)
-				//_,err=g.UDPConn.Read(bs)
-				_,_,err=g.UDPConn.ReadFrom(bs)
-				if err!=nil{
+				_, err := g.UDPConn.Read(bs)
+				if err != nil {
 					panic(err)
 				}
 				m := &v1.Message{}
@@ -77,7 +58,7 @@ func (g *GConn) init() {
 					g.recvWin.Recv(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
 				}
 				if m.Flag()&rule.FlagACK == rule.FlagACK {
-					g.sendWin.SetRecvSendWinSize(m.WinSize())
+					g.sendWin.SetSendWinSize(m.WinSize())
 					g.sendWin.Ack(m.AckN())
 				}
 			}

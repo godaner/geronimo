@@ -6,6 +6,7 @@ import (
 	"github.com/godaner/geronimo/win/datastruct"
 	"log"
 	"sync"
+	"time"
 )
 
 // The Receive-Window is as follow :
@@ -15,16 +16,19 @@ import (
 //          head                          tail                 fixedWinSize
 // list  <<--|-------|-------|------|-------|-------|-------|-------|--------|---------|---------|-----<< data flow
 //           |                              |                       |
-// consumed<=|==========>received<==========|======>ready recv<=====|=====>not allow recv
+// consumed<=|===========>recved<===========|======>ready recv<=====|=====>not allow recv
 //           |                              |                       |
 // seq =     0       1       2      3       4       5       0       1        2         3         4
 //
 // index =   0       1       2      3       4       5       6       7        8         9         10
+const (
+	checkWinInterval = 100
+)
 
 type AckCallBack func(ack, receiveWinSize uint16) (err error)
 
 // RWND
-//  recv window
+//  Receive window
 type RWND struct {
 	// status
 	recved       *datastruct.ByteBlockChan
@@ -37,8 +41,10 @@ type RWND struct {
 	AckCallBack AckCallBack
 	// helper
 	sync.Once
-	recvSig   chan bool // start recv data to the list
-	readyRecv *sync.Map
+	recvSig      chan bool // start recv data to the list
+	readyRecv    *sync.Map
+	readyRecvNum uint32
+	ackWin       bool
 }
 
 // rData
@@ -58,6 +64,7 @@ func (r *RWND) ReadFull(bs []byte) (n int, err error) {
 	r.init()
 	for i := 0; i < len(bs); i++ {
 		bs[i], _ = r.recved.BlockPop()
+
 	}
 	return len(bs), nil
 }
@@ -77,6 +84,7 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 		}
 		bs[i] = b
 		n++
+		log.Println("RWND : read , win size is", r.recvWinSize())
 	}
 	return n, nil
 }
@@ -84,6 +92,7 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 // Recv
 func (r *RWND) Recv(seqN uint16, bs []byte) {
 	r.init()
+	log.Println("RWND : recv seq is [", seqN, ",", seqN+uint16(len(bs))-1, "]")
 	for index, b := range bs {
 		r.readyRecv.Store(seqN, &rData{
 			b:       b,
@@ -91,14 +100,19 @@ func (r *RWND) Recv(seqN uint16, bs []byte) {
 			needAck: index == (len(bs) - 1),
 		})
 		r.incSeq(&seqN, 1)
+		r.readyRecvNum++
 	}
 	r.recvSig <- true
-
 }
 
-// receiveWinSize
-func (r *RWND) receiveWinSize() uint16 {
-	return r.fixedWinSize - uint16(r.recved.Len())
+// recvWinSize
+func (r *RWND) recvWinSize() uint16 {
+	i32 := int32(r.fixedWinSize) - int32(r.recved.Len()) - int32(r.readyRecvNum)
+	//i32 := int32(r.fixedWinSize) - int32(r.recved.Len())
+	if i32 <= 0 {
+		return 0
+	}
+	return uint16(i32)
 }
 
 func (r *RWND) init() {
@@ -111,12 +125,14 @@ func (r *RWND) init() {
 		r.recved = &datastruct.ByteBlockChan{Size: rule.MaxWinSize}
 		r.recvSig = make(chan bool)
 		r.readyRecv = &sync.Map{}
-		r.recv()
+		r.loopRecv()
+		r.loopAckWin()
+		r.loopPrint()
 	})
 }
 
-// recv
-func (r *RWND) recv() {
+// loopRecv
+func (r *RWND) loopRecv() {
 	go func() {
 		for {
 			select {
@@ -129,23 +145,18 @@ func (r *RWND) recv() {
 							if !firstCycle {
 								return
 							}
-							err := r.AckCallBack(r.tailSeq, r.receiveWinSize())
-							if err != nil {
-								log.Println("di is nil , ack callback err , err is", err.Error())
-							}
+							r.ack()
 							return
 						}
 						firstCycle = false
 						d := di.(*rData)
 						// clear seq cache
 						r.readyRecv.Delete(r.tailSeq)
+						r.readyRecvNum--
 						// slide window , next seq
 						r.incSeq(&r.tailSeq, 1)
 						if d.needAck { // ack before put data
-							err := r.AckCallBack(r.tailSeq, r.receiveWinSize())
-							if err != nil {
-								log.Println("need ack , ack callback err , err is", err.Error())
-							}
+							r.ack()
 						}
 						// put data to received , maybe block , so put it at the end
 						r.recved.Push(d.b)
@@ -156,7 +167,49 @@ func (r *RWND) recv() {
 	}()
 }
 
+// ack
+func (r *RWND) ack() {
+	rws := r.recvWinSize()
+	if rws <= 0 {
+		log.Println("RWND : set ackWin")
+		r.ackWin = true
+	}
+	err := r.AckCallBack(r.tailSeq, rws)
+	if err != nil {
+		log.Println("RWND : ack callback err , err is", err.Error())
+	}
+}
+
 // incSeq
 func (r *RWND) incSeq(seq *uint16, step uint16) {
 	*seq = (*seq+step)%r.maxSeq + r.minSeq
+}
+
+// loopPrint
+func (r *RWND) loopPrint() {
+	go func() {
+		for {
+			log.Println("RWND : recv win size is", r.recvWinSize(), ", ackWin is", r.ackWin)
+			//log.Println("RWND : recv win size is", r.recvWinSize())
+			time.Sleep(1000 * time.Millisecond)
+		}
+	}()
+}
+
+// loopAckWin
+func (r *RWND) loopAckWin() {
+	go func() {
+		t := time.NewTicker(time.Duration(checkWinInterval) * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				if r.ackWin && r.recvWinSize() > 0 {
+					log.Println("RWND : ack win , recv size is", r.recvWinSize())
+					r.ackWin = false
+					r.ack()
+				}
+			}
+		}
+	}()
 }

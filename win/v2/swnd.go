@@ -37,7 +37,7 @@ type SWND struct {
 	headSeq         uint16 // current head seq , location is head
 	tailSeq         uint16 // current tail seq , location is tail
 	// outer
-	WriterCallBack WriterCallBack
+	SendCallBack WriterCallBack
 	// helper
 	sync.Once
 	sendSig              chan bool // start send data to the list
@@ -58,8 +58,8 @@ func (s *SWND) Write(bs []byte) {
 	s.sendSig <- true
 }
 
-// SetRecvSendWinSize
-func (s *SWND) SetRecvSendWinSize(size uint16) {
+// SetSendWinSize
+func (s *SWND) SetSendWinSize(size uint16) {
 	s.init()
 	s.currRecvWinSize = size
 	s.currSendWinSize = s.currRecvWinSize
@@ -68,6 +68,7 @@ func (s *SWND) SetRecvSendWinSize(size uint16) {
 // Ack
 func (s *SWND) Ack(ackNs ...uint16) {
 	s.init()
+	log.Println("SWND : recv ack is", ackNs, "recv win size is", s.currSendWinSize)
 	// recv 0-3 => ack = 4
 	for _, ack := range ackNs {
 		m := s.quickResend(ack)
@@ -76,6 +77,7 @@ func (s *SWND) Ack(ackNs ...uint16) {
 		}
 		s.ack(ack)
 	}
+	s.sendSig <- true
 }
 
 func (s *SWND) init() {
@@ -95,13 +97,14 @@ func (s *SWND) init() {
 		s.segResendImmediately = &sync.Map{}
 		s.ackNum = &sync.Map{}
 		s.ackSeqCache = &sync.Map{}
-		s.send()
-		s.trimAck()
+		s.loopSend()
+		s.loopTrimAck()
+		s.loopPrint()
 	})
 }
 
-// trimAck
-func (s *SWND) trimAck() {
+// loopTrimAck
+func (s *SWND) loopTrimAck() {
 	f := func() {
 		defer func() {
 			s.sendSig <- true
@@ -128,8 +131,8 @@ func (s *SWND) trimAck() {
 	}()
 }
 
-// send
-func (s *SWND) send() {
+// loopSend
+func (s *SWND) loopSend() {
 	f := func() {
 		for {
 			if !s.sendAble() {
@@ -149,11 +152,9 @@ func (s *SWND) send() {
 			}
 			// set segment timeout
 			s.setSegResend(seqs, bs)
-			// write
-			err := s.WriterCallBack(firstSeq, bs)
-			if err != nil {
-				log.Println("writer call back err , err is", err.Error())
-			}
+			// send
+			s.send(firstSeq, bs)
+
 		}
 	}
 	go func() {
@@ -166,6 +167,13 @@ func (s *SWND) send() {
 			}
 		}
 	}()
+}
+func (s *SWND) send(firstSeq uint16, bs []byte) {
+	log.Println("SWND : send seq is [", firstSeq, ",", firstSeq+uint16(len(bs))-1, "]")
+	err := s.SendCallBack(firstSeq, bs)
+	if err != nil {
+		log.Println("SWND : send err , err is", err.Error())
+	}
 }
 
 // sendAble
@@ -210,6 +218,7 @@ func (s *SWND) setSegResend(seqs []uint16, bs []byte) {
 
 	go func() {
 		defer func() {
+			t.Stop()
 			s.segResendCancel.Delete(lastSeq)
 			s.segResendImmediately.Delete(lastSeq)
 			for _, seq := range seqs {
@@ -220,18 +229,10 @@ func (s *SWND) setSegResend(seqs []uint16, bs []byte) {
 		for {
 			select {
 			case <-t.C:
-				// write
-				err := s.WriterCallBack(firstSeq, bs)
-				if err != nil {
-					log.Println("ticker retry writer call back err , err is", err.Error())
-				}
+				s.send(firstSeq,bs)
 				continue
 			case <-reSendImmediately:
-				// write
-				err := s.WriterCallBack(firstSeq, bs)
-				if err != nil {
-					log.Println("immediately retry writer call back err , err is", err.Error())
-				}
+				s.send(firstSeq,bs)
 				continue
 			case <-reSendCancel:
 				return
@@ -244,7 +245,7 @@ func (s *SWND) setSegResend(seqs []uint16, bs []byte) {
 // rto
 //  retry time out
 func (s *SWND) rto() uint16 {
-	return 500
+	return 1000
 }
 
 // quickResend
@@ -264,6 +265,7 @@ func (s *SWND) quickResend(ack uint16) (match bool) {
 	c := ci.(chan bool)
 	c <- true
 	*num = 0
+	log.Println("SWND : quick resend seq is", ack)
 	return true
 }
 
@@ -276,4 +278,15 @@ func (s *SWND) ack(ack uint16) {
 	}
 	c := ci.(chan bool)
 	c <- true
+}
+
+// loopPrint
+func (s *SWND) loopPrint() {
+	go func() {
+		for {
+			log.Println("SWND : send win size is", s.currSendWinSize)
+			time.Sleep(1000 * time.Millisecond)
+		}
+	}()
+
 }

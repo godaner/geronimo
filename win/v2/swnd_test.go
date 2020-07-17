@@ -14,7 +14,7 @@ func TestSWND_Write(t *testing.T) {
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
 	swnd := SWND{
-		WriterCallBack: func(firstSeq uint16, bs []byte) (err error) {
+		SendCallBack: func(firstSeq uint16, bs []byte) (err error) {
 			fmt.Println(firstSeq,string(bs))
 			return nil
 		},
