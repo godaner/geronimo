@@ -139,7 +139,7 @@ func (r *RWND) init() {
 		r.maxSeq = rule.MaxSeqN
 		r.minSeq = rule.MinSeqN
 		r.tailSeq = r.minSeq
-		r.recved = &datastruct.ByteBlockChan{Size: rule.U1500} // todo ???? how much ????
+		r.recved = &datastruct.ByteBlockChan{Size: 0} // todo ???? how much ????
 		r.recvSig = make(chan bool)
 		r.readyRecv = &sync.Map{}
 		r.loopRecv()

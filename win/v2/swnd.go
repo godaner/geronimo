@@ -100,8 +100,8 @@ func (s *SWND) init() {
 		s.minSeq = rule.MinSeqN
 		s.tailSeq = s.minSeq
 		s.headSeq = s.tailSeq
-		s.sent = &datastruct.ByteBlockChan{Size: rule.U1500}
-		s.readySend = &datastruct.ByteBlockChan{Size: rule.U1500}
+		s.sent = &datastruct.ByteBlockChan{Size: 0}
+		s.readySend = &datastruct.ByteBlockChan{Size: 0}
 		s.segResendCancel = &sync.Map{}
 		s.segResendImmediately = &sync.Map{}
 		s.cancelResendResult = &sync.Map{}
@@ -169,7 +169,8 @@ func (s *SWND) setSegResend(seqs []uint16, bs []byte) {
 			s.segResendImmediately.Delete(lastSeq)
 			for _, seq := range seqs {
 				s.ackSeqCache.Store(seq, true)
-			} // cancel result
+			}
+			// cancel result
 			rI, _ := s.cancelResendResult.LoadOrStore(lastSeq, make(chan bool))
 			r := rI.(chan bool)
 			r <- true
