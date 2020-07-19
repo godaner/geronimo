@@ -31,7 +31,10 @@ func TestGConn_Read(t *testing.T) {
 		Port: 1111,
 		Zone: "",
 	})
-	s:=[]byte("kecasdadad")
+	s:=[]byte{}
+	for i:=0;i<25;i++{
+		s=append(s,[]byte("kecasdadad")...)
+	}
 	go func() {
 		for ; ;  {
 			c1.Write(s)

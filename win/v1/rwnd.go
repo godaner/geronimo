@@ -48,6 +48,7 @@ type RWND struct {
 	ackWin       bool
 	tailSeqLock  sync.RWMutex
 	recvLock     sync.RWMutex
+	// todo no channel , win lock ,var window size
 }
 
 // rData
