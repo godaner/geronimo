@@ -29,9 +29,11 @@ const (
 	DefWinSize = 4096 // main !!!!!!!!
 	//DefWinSize = 8 // for test
 	//DefWinSize = 4 // for test
+	//DefWinSize = 1 // for test
 )
 const (
 	MSS = DefWinSize / 4
+	//MSS = 1 // for test
 )
 const (
 	U1500 = uint32(1500)

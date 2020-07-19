@@ -149,38 +149,41 @@ func (r *RWND) init() {
 
 // loopRecv
 func (r *RWND) loopRecv() {
+	f:=func() {
+		firstCycle := true // eg. if no firstCycle , cache have seq 9 , 9 ack will be sent twice
+		for {
+			tailSeq := r.getTailSeq()
+			di, _ := r.readyRecv.Load(tailSeq)
+			if di == nil {
+				if !firstCycle {
+					return
+				}
+				r.ack("1", nil)
+				return
+			}
+			firstCycle = false
+			d := di.(*rData)
+			// clear seq cache
+			r.readyRecv.Delete(tailSeq)
+			atomic.AddInt64(&r.readyRecvNum, -1)
+			// slide window , next seq
+			r.incTailSeq(1)
+			// put data to received
+			r.recved.Push(d.b)
+			// ack it
+			if d.needAck {
+				r.ack("2", nil)
+				return // segment end
+			}
+		}
+	}
 	go func() {
 		for {
 			select {
 			case <-r.recvSig:
-				func() {
-					firstCycle := true // eg. if no firstCycle , cache have seq 9 , 9 ack will be sent twice
-					for {
-						tailSeq := r.getTailSeq()
-						di, _ := r.readyRecv.Load(tailSeq)
-						if di == nil {
-							if !firstCycle {
-								return
-							}
-							r.ack("1", nil)
-							return
-						}
-						firstCycle = false
-						d := di.(*rData)
-						// clear seq cache
-						r.readyRecv.Delete(tailSeq)
-						atomic.AddInt64(&r.readyRecvNum, -1)
-						// slide window , next seq
-						r.incTailSeq(1)
-						// put data to received
-						r.recved.Push(d.b)
-						// ack it
-						if d.needAck {
-							r.ack("2", nil)
-							return // segment end
-						}
-					}
-				}()
+				f()
+			//case <-time.After(250 * time.Millisecond):
+			//	f()
 			}
 		}
 	}()
