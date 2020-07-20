@@ -26,19 +26,18 @@ const (
 const (
 	MaxWinSize = MaxSeqN
 	//MinWinSize = 2
-	//DefWinSize = 1024*1 // main !!!!!!!!
-	DefWinSize = 512 // main !!!!!!!!
-	//DefWinSize = 8 // for test
+	//DefWinSize = 1024*2 // main !!!!!!!!
+	//DefWinSize = 512 // main !!!!!!!!
+	DefWinSize = 8 // for test
 	//DefWinSize = 4 // for test
 	//DefWinSize = 1 // for test
 )
 const (
 	MSS = 1472-13
+	//MSS = 1400
 	//MSS = 1 // for test
 )
-const (
-	//U1500 = uint32(1500)
-)
+
 
 type Header interface {
 	SeqN() uint16

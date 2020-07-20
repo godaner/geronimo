@@ -5,6 +5,7 @@ import (
 	"github.com/godaner/geronimo/rule"
 	"github.com/godaner/geronimo/win/datastruct"
 	"log"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +25,14 @@ import (
 // index =         0       1       2      3       4       5       6       7        8       9       10
 const (
 	quickResendIfAckGEN = 3
+)
+const (
+	rtts_a  = float64(0.125)
+	rttd_b  = float64(0.25)
+	def_rto = float64(1000)
+	def_rtt = float64(500)
+	min_rto = float64(1)
+	max_rto = float64(3000)
 )
 
 type SegmentSender func(firstSeq uint16, bs []byte) (err error)
@@ -50,6 +59,10 @@ type SWND struct {
 	tailSeqLock          sync.RWMutex
 	headSeqLock          sync.RWMutex
 	winLock              sync.RWMutex
+	rtts                 float64
+	rttd                 float64
+	rto                  float64
+	rtoLock              sync.RWMutex
 }
 
 // Write
@@ -61,8 +74,8 @@ func (s *SWND) Write(bs []byte) {
 	s.send()
 }
 
-// AckSegment
-func (s *SWND) AckSegment(winSize uint16, ackNs ...uint16) {
+// RecvAckSegment
+func (s *SWND) RecvAckSegment(winSize uint16, ackNs ...uint16) {
 	s.init()
 	s.winLock.Lock()
 	s.sendWinSize = int64(winSize)
@@ -91,6 +104,9 @@ func (s *SWND) init() {
 		s.minSeq = rule.MinSeqN
 		s.tailSeq = s.minSeq
 		s.headSeq = s.tailSeq
+		s.rto = def_rto
+		s.rtts = def_rtt
+		s.rttd = def_rtt
 		s.sent = &datastruct.ByteBlockChan{Size: 0}
 		s.readySend = &datastruct.ByteBlockChan{Size: 0}
 		s.segResendCancel = &sync.Map{}
@@ -148,14 +164,24 @@ func (s *SWND) send() {
 func (s *SWND) setSegmentResend(seqs []uint16, bs []byte) {
 	lastSeq := seqs[len(seqs)-1]
 	firstSeq := seqs[0]
-	t := time.NewTicker(time.Duration(s.rto()) * time.Millisecond)
+	t := time.NewTimer(time.Duration(int64(s.getRTO())) * time.Millisecond)
 	reSendCancelI, _ := s.segResendCancel.LoadOrStore(lastSeq, make(chan bool))
 	reSendImmediatelyI, _ := s.segResendImmediately.LoadOrStore(lastSeq, make(chan bool))
 	reSendCancel := reSendCancelI.(chan bool)
 	reSendImmediately := reSendImmediatelyI.(chan bool)
+	select {
+	case <-reSendCancel:
+		panic("fuck ! who repeat this ?")
+	default:
+	}
+
+	rttms := time.Now().UnixNano() / 1e6 // ms
 	log.Println("SWND : set resend progress success , seqs is ", seqs, ", lastSeq is :", lastSeq)
 	go func() {
 		defer func() {
+			rttme := time.Now().UnixNano()/1e6 - rttms
+			log.Println("SWND : rttm is", rttme)
+			s.comRTO(float64(rttme))
 			t.Stop()
 			s.resetAckNum(firstSeq)
 			s.segResendCancel.Delete(lastSeq)
@@ -171,10 +197,13 @@ func (s *SWND) setSegmentResend(seqs []uint16, bs []byte) {
 		for {
 			select {
 			case <-t.C:
+				s.incRTO()
 				s.sendCallBack("2", firstSeq, bs)
+				t.Reset(time.Duration(int64(s.getRTO())) * time.Millisecond)
 				continue
 			case <-reSendImmediately:
 				s.sendCallBack("3", firstSeq, bs)
+				t.Reset(time.Duration(int64(s.getRTO())) * time.Millisecond)
 				continue
 			case <-reSendCancel:
 				return
@@ -198,7 +227,7 @@ func (s *SWND) readSegment() (bs []byte) {
 }
 
 func (s *SWND) sendCallBack(tag string, firstSeq uint16, bs []byte) {
-	log.Println("SWND : send , tag is", tag, ", seq is [", firstSeq, ",", firstSeq+uint16(len(bs))-1, "]", ", win is", s.sendWinSize)
+	log.Println("SWND : send , tag is", tag, ", seq is [", firstSeq, ",", firstSeq+uint16(len(bs))-1, "]", ", win is", s.sendWinSize, ", rto is", s.getRTO())
 	err := s.SegmentSender(firstSeq, bs)
 	if err != nil {
 		log.Println("SWND : send , tag is", tag, ", err , err is", err.Error())
@@ -247,10 +276,39 @@ func (s *SWND) decSeq(seq *uint16, step uint16) {
 	// (5+8-1)%8 = 4
 }
 
-// rto
-//  retry time out
-func (s *SWND) rto() uint16 {
-	return 1000
+// comRTO
+func (s *SWND) comRTO(rttm float64) {
+	s.rtoLock.Lock()
+	defer s.rtoLock.Unlock()
+	s.rtts = (1-rtts_a)*s.rtts + rtts_a*rttm
+	s.rttd = (1-rttd_b)*s.rttd + rttd_b*math.Abs(rttm-s.rtts)
+	s.rto = s.rtts + 4*s.rttd
+	if s.rto < min_rto {
+		s.rto = min_rto
+	}
+	if s.rto > max_rto {
+		s.rto = max_rto
+	}
+}
+
+// incRTO
+func (s *SWND) incRTO() {
+	s.rtoLock.Lock()
+	defer s.rtoLock.Unlock()
+	s.rto = 2 * s.rto
+	if s.rto < min_rto {
+		s.rto = min_rto
+	}
+	if s.rto > max_rto {
+		s.rto = max_rto
+	}
+}
+
+// getRTO
+func (s *SWND) getRTO() (rto float64) {
+	s.rtoLock.RLock()
+	defer s.rtoLock.RUnlock()
+	return s.rto
 }
 
 // quickResendSegment
@@ -307,7 +365,7 @@ func (s *SWND) ack(ack uint16) {
 		log.Println("SWND : find resend cancel , origin ack is", originAck)
 		select {
 		case <-r:
-			log.Println("SWND : cancel resend finish , origin ack is", originAck)
+			log.Println("SWND : cancel resend finish , origin ack is", originAck, ", rto is", s.getRTO())
 			return
 		case <-time.After(1000 * time.Millisecond):
 			log.Println("SWND : cancel resend timeout , origin ack is", originAck)

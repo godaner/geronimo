@@ -7,7 +7,18 @@ import (
 	"testing"
 	"time"
 )
-
+func TestSWND_Write2(t *testing.T) {
+	i:=100
+	tt:=time.NewTimer(time.Duration(i)*time.Millisecond)
+	for ;;{
+		select {
+		case <-tt.C:
+			fmt.Println("a")
+			i+=100
+			tt.Reset(time.Duration(i)*time.Millisecond)
+		}
+	}
+}
 func TestSWND_Write(t *testing.T) {
 	// DefWinSize = 8 !!!!
 	// mms = 2
@@ -34,13 +45,13 @@ func TestSWND_Write(t *testing.T) {
 	}()
 
 	time.Sleep(2 * time.Second)
-	swnd.AckSegment(2) // win = 9
+	swnd.RecvAckSegment(2) // win = 9
 	fmt.Println("ack1")
 	time.Sleep(2 * time.Second)
-	swnd.AckSegment(4) // win = 9
+	swnd.RecvAckSegment(4) // win = 9
 	fmt.Println("ack2")
 	//time.Sleep(5 * time.Second)
-	//swnd.AckSegment(11)
+	//swnd.RecvAckSegment(11)
 	//fmt.Println("ack2")
 
 	time.Sleep(1000 * time.Hour)

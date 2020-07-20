@@ -45,7 +45,7 @@ func (g *GConn) init() {
 		}
 		go func() {
 			// recv udp
-			bs := make([]byte, 1500, 1500)
+			bs := make([]byte, 1472, 1472)
 			for {
 				_, err := g.UDPConn.Read(bs)
 				if err != nil {
@@ -53,13 +53,12 @@ func (g *GConn) init() {
 				}
 				m := &v1.Message{}
 				m.UnMarshall(bs)
-
 				if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
 					g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
 					continue
 				}
 				if m.Flag()&rule.FlagACK == rule.FlagACK {
-					g.sendWin.AckSegment(m.WinSize(),m.AckN())
+					g.sendWin.RecvAckSegment(m.WinSize(),m.AckN())
 					continue
 				}
 				panic("no handler")
