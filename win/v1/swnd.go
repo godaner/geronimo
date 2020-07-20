@@ -5,6 +5,7 @@ import (
 	"github.com/godaner/geronimo/rule"
 	"github.com/godaner/geronimo/win/datastruct"
 	"log"
+	"math"
 	"sync"
 	"time"
 )
@@ -12,9 +13,8 @@ import (
 // The Send-Window is as follow :
 // sws = 5
 // seq range = 0-5
-//                 p1                                     p2
-//          last ack received                       last frame sent                   last not send
-//               [lar)                                  [lfs)                           [lns) = lfs + (sws-(lfs-lar))
+//               headSeq                               tailSeq
+//          	  head                                  tail                        congWinSize
 // list    <<------|-------|-------|------|-------|-------|-------|-------|-------|--------|--------|-----<< data flow
 //                 |                                      |                                |
 // sent and ack<===|==========>sent but not ack<==========|====>allow send but not send<===|===>not allow send
@@ -22,337 +22,385 @@ import (
 // seq =           0       1       2      3       4       5       0       1        2       3       4
 //
 // index =         0       1       2      3       4       5       6       7        8       9       10
-
 const (
-	windowHead = "window_head"
+	quickResendIfAckGEN = 3
+)
+const (
+	rtts_a  = float64(0.125)
+	rttd_b  = float64(0.25)
+	def_rto = float64(1000)
+	def_rtt = float64(500)
+	min_rto = float64(1)
+	max_rto = float64(3000)
 )
 
-type WriterCallBack func(firstSeq uint16, bs []byte) (err error)
+type SegmentSender func(firstSeq uint16, bs []byte) (err error)
 
-// SWND
-//  send window
 type SWND struct {
 	// status
-	//ds     []*sData
-	ds     *datastruct.ArrayList
-	sws    uint16 // send window size
-	mss    uint16 // mss
-	lar    int32  // last ack received
-	lfs    int32  // last frame sent
-	maxSeq uint16 // max seq
-	minSeq uint16 // min seq
-	cSeq   uint16 // current seq
+	sent        *datastruct.ByteBlockChan
+	sendWinSize int64  // send window size , from "congestion window size" or receive window size
+	congWinSize int64  // congestion window size
+	recvWinSize int64  // recv window size , from ack
+	headSeq     uint16 // current head seq , location is head
+	tailSeq     uint16 // current tail seq , location is tail
+	ssthresh    int64  // ssthresh
 	// outer
-	WriterCallBack WriterCallBack
+	SegmentSender SegmentSender
 	// helper
-	sendWindowSignal chan bool
-	ackSignal        chan uint16
-	ackChannel       *sync.Map // map[uint16]chan uint16
 	sync.Once
-	winLock sync.RWMutex // lock the win
+	readySend            *datastruct.ByteBlockChan
+	segResendCancel      *sync.Map // for cancel resend
+	segResendImmediately *sync.Map // for resend
+	ackNum               *sync.Map // for quick resend
+	ackSeqCache          *sync.Map // for slide head to right
+	cancelResendResult   *sync.Map // for ack progress
+	tailSeqLock          sync.RWMutex
+	headSeqLock          sync.RWMutex
+	winLock              sync.RWMutex
+	rtts                 float64
+	rttd                 float64
+	rto                  float64
+	rtoLock              sync.RWMutex
 }
 
-// sData
-type sData struct {
-	b   byte
-	seq uint16
-}
-
-func (s *sData) String() string {
-	return fmt.Sprintf("{%v:%v}", s.seq, string(s.b))
-}
-func (s *SWND) String() string {
-	s.init()
-	return fmt.Sprintf("ds is : %v , lar is : %v , lfs is : %v ,sws is : %v , mss is : %v !", s.ds.String(), s.lar, s.lfs, s.sws, s.mss)
-}
+// Write
 func (s *SWND) Write(bs []byte) {
 	s.init()
-	s.ds.Append(s.bytes2dataInfs(bs)...)
-	s.sendWindowSignal <- true
-}
-func (s *SWND) SetSWS(sws uint16) {
-	s.init()
-	s.sws = sws
-	s.sendWindowSignal <- true
-}
-func (s *SWND) Ack(ackNs ...uint16) {
-	s.init()
-	for _, ackN := range ackNs {
-		s.ackSignal <- ackN
+	for _, b := range bs {
+		s.readySend.BlockPush(b)
 	}
+	s.send()
+}
+
+// RecvAckSegment
+func (s *SWND) RecvAckSegment(winSize uint16, ackNs ...uint16) {
+	s.init()
+	s.winLock.Lock()
+	s.recvWinSize = int64(winSize)
+
+	defer func() {
+		s.winLock.Unlock()
+		s.trimAck()
+		s.send()
+	}()
+	log.Println("SWND : recv ack is", ackNs, ", recv win size is", s.recvWinSize)
+	// recv 0-3 => ack = 4
+	for _, ack := range ackNs {
+		m := s.quickResendSegment(ack)
+		if m {
+			continue
+		}
+		s.ack(ack)
+	}
+
+}
+// comSendWinSize
+func (s *SWND) comSendWinSize() {
+	s.sendWinSize = int64(math.Min(float64(s.recvWinSize), float64(s.congWinSize)))
 }
 
 func (s *SWND) init() {
 	s.Do(func() {
-		s.sws = rule.DefCongWinSize
-		s.mss = rule.MSS
-		s.maxSeq = rule.MaxSeqN
-		s.minSeq = rule.MinSeqN
-		s.cSeq = s.minSeq
-		s.lar = 0
-		s.lfs = 0
-		s.ds = &datastruct.ArrayList{}
-		s.ds.Append(windowHead) // for lar , lfs
-		//s.ds = make([]*sData, 0)
-		s.ackChannel = &sync.Map{}
-		s.sendWindowSignal = make(chan bool)
-		s.ackSignal = make(chan uint16)
-		s.sendWindow()
-		s.recvAck()
+		s.ssthresh = rule.DefSsthresh
+		s.congWinSize = rule.DefCongWinSize
+		s.sendWinSize = s.congWinSize
+		s.tailSeq = rule.MinSeqN
+		s.headSeq = s.tailSeq
+		s.rto = def_rto
+		s.rtts = def_rtt
+		s.rttd = def_rtt
+		s.sent = &datastruct.ByteBlockChan{Size: 0}
+		s.readySend = &datastruct.ByteBlockChan{Size: 0}
+		s.segResendCancel = &sync.Map{}
+		s.segResendImmediately = &sync.Map{}
+		s.cancelResendResult = &sync.Map{}
+		s.ackNum = &sync.Map{}
+		s.ackSeqCache = &sync.Map{}
+		s.loopPrint()
 	})
 }
-
-// incSeq
-func (s *SWND) incSeq(seq *uint16, step uint16) {
-	*seq = (*seq + step) % s.maxSeq
-}
-
-// readWindowSegment
-//  split window data to segment by mss
-func (s *SWND) readWindowSegment() (seqNs []uint16) {
-	s.rangeWindowNotSend(func(index uint16, d *sData) (cti bool) {
-		seqNs = append(seqNs, d.seq)
-		return true
-	})
-	return seqNs
-}
-
-type rangeCallBack func(index uint16, d *sData) (cti bool)
-
-// rangeWindow
-func (s *SWND) rangeWindow(f rangeCallBack) {
-	s.ds.RangeWithStart(func(index uint32, d interface{}) (cti bool) {
-		if !(int32(index) <= int32(s.lns()) && int32(index) < int32(s.ds.Len())) {
-			return false
-		}
-		return f(uint16(index), d.(*sData))
-	}, uint32(s.lar+1))
-}
-
-// rangeWindowNotAck
-func (s *SWND) rangeWindowNotAck(f rangeCallBack) {
-	s.ds.RangeWithStart(func(index uint32, d interface{}) (cti bool) {
-		if !(int32(index) <= s.lfs) {
-			return false
-		}
-		return f(uint16(index), d.(*sData))
-	}, uint32(s.lar+1))
-}
-
-// rangeWindowNotSend
-func (s *SWND) rangeWindowNotSend(f rangeCallBack) {
-	start := s.lfs + 1
-	s.ds.RangeWithStart(func(index uint32, d interface{}) (cti bool) {
-		if !(index-uint32(start)+1 <= uint32(s.mss) && index < s.ds.Len() && s.notAckNum() < s.sws) {
-			return false
-		}
-		return f(uint16(index), d.(*sData))
-	}, uint32(start))
-}
-
-// containUint16
-func (s *SWND) containUint16(tar uint16, src []uint16) (yes bool) {
-	for _, sr := range src {
-		if tar == sr {
-			return true
-		}
-	}
-	return false
-}
-
-// recvAck
-func (s *SWND) recvAck() {
-	go func() {
-		for {
-			select {
-			case ackN := <-s.ackSignal:
-				func() {
-					s.winLock.Lock()
-					defer s.winLock.Unlock()
-					log.Println("ackN is", ackN)
-					ackN = ackN - 1
-					if s.illegalAck(ackN) {
-						return
-					}
-					log.Println("ackN2 is", ackN)
-					// slide windows
-					acNIndex := uint32(0)
-					var acNData *sData
-					s.rangeWindow(func(index uint16, d *sData) (cti bool) {
-						if d.seq > ackN {
-							return false
-						}
-						// cancel ack timeout
-						ackCI, ok := s.ackChannel.Load(d.seq)
-						if ok && ackCI != nil {
-							ackC, ok := ackCI.(chan uint16)
-							if ok && ackC != nil {
-								ackC <- ackN
-								s.ackChannel.Delete(d.seq)
-								log.Println("cancel ack timeout", d.seq)
-							}
-						}
-						if d.seq == ackN {
-							acNIndex = uint32(index)
-							acNData = d
-							return false
-						}
-						return true
-					})
-
-					// move pointer lar
-					if acNData != nil {
-						log.Println("slide window lar to", acNIndex)
-						//  0    1    2    3    4    5    6
-						// lar                      lfs
-						// ackN = 2
-
-						err := s.ds.KeepRight(acNIndex)
-						if err != nil {
-							log.Println("keep right window err", err)
-						}
-						s.lfs = s.lfs - int32(acNIndex)
-						s.lar = 0
-						s.ds.Set(0, windowHead)
-					}
-					s.sendWindowSignal <- true
-				}()
-			}
-
-		}
-	}()
-}
-
-// sendWindow
-func (s *SWND) sendWindow() {
-	go func() {
-		for {
-			select {
-			case <-s.sendWindowSignal:
-				func() {
-					s.winLock.Lock()
-					defer s.winLock.Unlock()
-					for { // send segment one by one
-						seqNs := s.readWindowSegment()
-						if len(seqNs) <= 0 {
-							return
-						}
-						s.sendSegment(seqNs...)
-						s.lfs += int32(len(seqNs))
-					}
-				}()
-			}
-
-		}
-	}()
-}
-func (s *SWND) illegalAck(ackN uint16) (yes bool) {
-	index := s.getAckNIndex(ackN)
-	return int32(index) > s.lfs || int32(index) <= s.lar
-}
-func (s *SWND) getAckNIndex(ackN uint16) (index uint16) {
-	s.rangeWindow(func(i uint16, d *sData) (cti bool) {
-		if d.seq == ackN {
-			index = i
-			return false
-		}
-		return true
-	})
-	return index
-}
-func (s *SWND) notSendNum() (num uint16) {
-	return s.sws - s.notAckNum()
-}
-func (s *SWND) notAckNum() (num uint16) {
-	return uint16(s.lfs - s.lar)
-}
-func (s *SWND) lns() (index uint16) {
-	return uint16(s.lfs + int32(s.notSendNum()))
-}
-
-// setSegmentTimeout
-//  set timeout in last seq number
-func (s *SWND) setSegmentTimeout(seqNs ...uint16) {
-	go func() {
-		t := time.NewTicker(time.Duration(s.rto()) * time.Millisecond)
-		log.Println("set timeout with seq", seqNs[len(seqNs)-1])
-		ackCI, _ := s.ackChannel.LoadOrStore(seqNs[len(seqNs)-1], make(chan uint16, 1))
-		ackC, _ := ackCI.(chan uint16)
-		select {
-		case <-t.C: // timeout
-			s.sendSegment(seqNs...)
-			return
-		case <-ackC: // not timeout
+func (s *SWND) trimAck() {
+	s.winLock.Lock()
+	defer s.winLock.Unlock()
+	for {
+		headSeq := s.getHeadSeq()
+		d, ok := s.ackSeqCache.Load(headSeq)
+		if !ok && d == nil {
 			return
 		}
+		s.sent.BlockPop()
+		s.ackSeqCache.Delete(headSeq)
+		s.incHeadSeq(1)
+	}
+}
+func (s *SWND) send() {
+	s.winLock.Lock()
+	defer s.winLock.Unlock()
+	for {
+		if s.sendWinSize-int64(s.sent.Len()) <= 0 {
+			return
+		}
+		bs := s.readSegment()
+		if len(bs) <= 0 {
+			return
+		}
+		// push to sent collection
+		firstSeq := s.getTailSeq()
+		seqs := make([]uint16, 0)
+		for _, b := range bs {
+			s.sent.BlockPush(b)
+			seqs = append(seqs, s.getTailSeq())
+			s.incTailSeq(1)
+		}
+		// set segment timeout
+		s.setSegmentResend(seqs, bs)
+		// send
+		s.sendCallBack("1", firstSeq, bs)
+
+	}
+}
+
+// setSegmentResend
+func (s *SWND) setSegmentResend(seqs []uint16, bs []byte) {
+	lastSeq := seqs[len(seqs)-1]
+	firstSeq := seqs[0]
+	t := time.NewTimer(time.Duration(int64(s.getRTO())) * time.Millisecond)
+	reSendCancelI, _ := s.segResendCancel.LoadOrStore(lastSeq, make(chan bool))
+	reSendImmediatelyI, _ := s.segResendImmediately.LoadOrStore(lastSeq, make(chan bool))
+	reSendCancel := reSendCancelI.(chan bool)
+	reSendImmediately := reSendImmediatelyI.(chan bool)
+	select {
+	case <-reSendCancel:
+		panic("fuck ! who repeat this ?")
+	default:
+	}
+
+	rttms := time.Now().UnixNano() / 1e6 // ms
+	log.Println("SWND : set resend progress success , seqs is ", seqs, ", lastSeq is :", lastSeq)
+	go func() {
+		defer func() {
+			rttme := time.Now().UnixNano()/1e6 - rttms
+			if s.ssthresh <= s.congWinSize {
+				s.congWinSize += rule.MSS // slow start
+			} else {
+				s.congWinSize *= 2 * rule.MSS
+			}
+			if s.congWinSize > rule.DefRecWinSize {
+				s.congWinSize = rule.DefRecWinSize
+			}
+			s.comSendWinSize()
+			log.Println("SWND : rttm is", rttme, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize)
+			s.comRTO(float64(rttme))
+			t.Stop()
+			s.resetAckNum(firstSeq)
+			s.segResendCancel.Delete(lastSeq)
+			s.segResendImmediately.Delete(lastSeq)
+			for _, seq := range seqs {
+				s.ackSeqCache.Store(seq, true)
+			}
+			// cancel result
+			rI, _ := s.cancelResendResult.LoadOrStore(lastSeq, make(chan bool))
+			r := rI.(chan bool)
+			r <- true
+		}()
+		for {
+			select {
+			case <-t.C:
+				s.ssthresh = s.congWinSize / 2
+				s.congWinSize = 1 * rule.MSS
+				s.comSendWinSize()
+				s.incRTO()
+				s.sendCallBack("2", firstSeq, bs)
+				t.Reset(time.Duration(int64(s.getRTO())) * time.Millisecond)
+				continue
+			case <-reSendImmediately:
+				s.ssthresh = s.congWinSize / 2
+				s.congWinSize = s.ssthresh
+				s.comSendWinSize()
+				s.sendCallBack("3", firstSeq, bs)
+				t.Reset(time.Duration(int64(s.getRTO())) * time.Millisecond)
+				continue
+			case <-reSendCancel:
+				return
+			}
+		}
+
 	}()
 }
 
-// sendSegment
-func (s *SWND) sendSegment(seqNs ...uint16) {
-	ds := s.getDataBySeqNs(seqNs...)
-	err := s.WriterCallBack(seqNs[0], s.datas2bytes(ds))
-	if err != nil {
-		return
-	}
-	s.setSegmentTimeout(seqNs...)
-}
-
-// getDataBySeqNs
-func (s *SWND) getDataBySeqNs(seqNs ...uint16) (ds []*sData) {
-	s.rangeWindow(func(index uint16, d *sData) (cti bool) {
-		if s.containUint16(d.seq, seqNs) {
-			ds = append(ds, d)
+// readSegment
+func (s *SWND) readSegment() (bs []byte) {
+	ws := int(s.sendWinSize - int64(s.sent.Len()))
+	for i := 0; i < rule.MSS && i < ws; i++ {
+		usable, b, _ := s.readySend.Pop()
+		if !usable {
+			break
 		}
-		return true
-	})
-	return ds
-}
+		bs = append(bs, b)
 
-// data2bytes
-func (s *SWND) datas2bytes(ds []*sData) (bs []byte) {
-	for _, d := range ds {
-		bs = append(bs, d.b)
 	}
 	return bs
 }
 
-// datasSeqNs
-func (s *SWND) datasSeqNs(ds []*sData) (seqNs []uint16) {
-	for _, d := range ds {
-		seqNs = append(seqNs, d.seq)
+func (s *SWND) sendCallBack(tag string, firstSeq uint16, bs []byte) {
+	log.Println("SWND : send , tag is", tag, ", seq is [", firstSeq, ",", firstSeq+uint16(len(bs))-1, "]", ", send win is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", s.getRTO())
+	err := s.SegmentSender(firstSeq, bs)
+	if err != nil {
+		log.Println("SWND : send , tag is", tag, ", err , err is", err.Error())
 	}
-	return seqNs
 }
 
-// bytes2datas
-func (s *SWND) bytes2datas(bs []byte) (ds []*sData) {
-	ds = make([]*sData, 0)
-	for _, b := range bs {
-		ds = append(ds, &sData{
-			b:   b,
-			seq: s.cSeq,
-		})
-		s.incSeq(&s.cSeq, 1)
-	}
-	return ds
+// incSeq
+func (s *SWND) incSeq(seq *uint16, step uint16) {
+	*seq = (*seq+step)%rule.MaxSeqN + rule.MinSeqN
 }
 
-// bytes2dataInfs
-func (s *SWND) bytes2dataInfs(bs []byte) (ds []interface{}) {
-	ds = make([]interface{}, 0)
-	for _, b := range bs {
-		ds = append(ds, &sData{
-			b:   b,
-			seq: s.cSeq,
-		})
-		s.incSeq(&s.cSeq, 1)
-	}
-	return ds
+// incTailSeq
+func (s *SWND) incTailSeq(step uint16) (tailSeq uint16) {
+	s.tailSeqLock.Lock()
+	defer s.tailSeqLock.Unlock()
+	s.incSeq(&s.tailSeq, step)
+	return s.tailSeq
 }
 
-// rto
-//  uint is : ms
-func (s *SWND) rto() (rto uint16) {
-	return 5000
+// getTailSeq
+func (s *SWND) getTailSeq() (tailSeq uint16) {
+	s.tailSeqLock.RLock()
+	defer s.tailSeqLock.RUnlock()
+	return s.tailSeq
+}
+
+// incHeadSeq
+func (s *SWND) incHeadSeq(step uint16) (headSeq uint16) {
+	s.headSeqLock.Lock()
+	defer s.headSeqLock.Unlock()
+	s.incSeq(&s.headSeq, step)
+	return s.headSeq
+}
+
+// getHeadSeq
+func (s *SWND) getHeadSeq() (headSeq uint16) {
+	s.headSeqLock.RLock()
+	defer s.headSeqLock.RUnlock()
+	return s.headSeq
+}
+
+// decSeq
+func (s *SWND) decSeq(seq *uint16, step uint16) {
+	*seq = ((*seq + rule.MaxSeqN) - step) % rule.MaxSeqN
+	// (0+8-1)%8 = 7
+	// (5+8-1)%8 = 4
+}
+
+// comRTO
+func (s *SWND) comRTO(rttm float64) {
+	s.rtoLock.Lock()
+	defer s.rtoLock.Unlock()
+	s.rtts = (1-rtts_a)*s.rtts + rtts_a*rttm
+	s.rttd = (1-rttd_b)*s.rttd + rttd_b*math.Abs(rttm-s.rtts)
+	s.rto = s.rtts + 4*s.rttd
+	if s.rto < min_rto {
+		s.rto = min_rto
+	}
+	if s.rto > max_rto {
+		s.rto = max_rto
+	}
+}
+
+// incRTO
+func (s *SWND) incRTO() {
+	s.rtoLock.Lock()
+	defer s.rtoLock.Unlock()
+	s.rto = 2 * s.rto
+	if s.rto < min_rto {
+		s.rto = min_rto
+	}
+	if s.rto > max_rto {
+		s.rto = max_rto
+	}
+}
+
+// getRTO
+func (s *SWND) getRTO() (rto float64) {
+	s.rtoLock.RLock()
+	defer s.rtoLock.RUnlock()
+	return s.rto
+}
+
+// quickResendSegment
+func (s *SWND) quickResendSegment(ack uint16) (match bool) {
+
+	zero := uint8(0)
+	numI, _ := s.ackNum.LoadOrStore(ack, &zero)
+	num := numI.(*uint8)
+	*num++
+	if *num < quickResendIfAckGEN {
+		return false
+	}
+	ci, _ := s.segResendImmediately.Load(ack)
+	if ci == nil { // not data wait to send
+		*num = 0
+		log.Println("SWND : no resend to be find , ack is", ack)
+		return false
+	}
+	c := ci.(chan bool)
+	select {
+	case c <- true:
+	case <-time.After(100 * time.Millisecond):
+		log.Println("SWND : no resend imm be found , ack is", ack)
+	}
+	*num = 0
+	log.Println("SWND : quick resend seq is", ack)
+	return true
+}
+
+// resetAckNum
+func (s *SWND) resetAckNum(ack uint16) {
+	zero := uint8(0)
+	numI, _ := s.ackNum.LoadOrStore(ack, &zero)
+	num := numI.(*uint8)
+	*num = 0
+}
+
+// ack
+func (s *SWND) ack(ack uint16) {
+	originAck := ack
+	s.decSeq(&ack, 1)
+	ci, _ := s.segResendCancel.Load(ack)
+	if ci == nil {
+		log.Println("SWND : no be ack find , decack is", ack)
+		return
+	}
+	// cancel result
+	rI, _ := s.cancelResendResult.LoadOrStore(ack, make(chan bool))
+	r := rI.(chan bool)
+
+	c := ci.(chan bool)
+	select {
+	case c <- true:
+		log.Println("SWND : find resend cancel , origin ack is", originAck)
+		select {
+		case <-r:
+			log.Println("SWND : cancel resend finish , origin ack is", originAck, ", rto is", s.getRTO())
+			return
+		case <-time.After(1000 * time.Millisecond):
+			log.Println("SWND : cancel resend timeout , origin ack is", originAck)
+			panic("cancel resend timeout , origin ack is " + fmt.Sprint(originAck))
+		}
+		//case <-time.After(100 * time.Millisecond):
+		//	log.Println("SWND : no resend cancel be found , origin ack is", originAck)
+		//	return
+	}
+}
+
+// loopPrint
+func (s *SWND) loopPrint() {
+	go func() {
+		for {
+			log.Println("SWND : print , sent len is ", s.sent.Len(), ", readySend len is", s.readySend.Len(), ", send win size is", s.sendWinSize, ", recv win size is", s.recvWinSize, ", cong win size is", s.congWinSize)
+			time.Sleep(1000 * time.Millisecond)
+		}
+	}()
+
 }

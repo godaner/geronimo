@@ -16,7 +16,7 @@ const (
 	AttrPAYLOAD = iota // payload
 )
 const (
-	MaxSeqN = DefRecWinSize * 2
+	MaxSeqN = DefRecWinSize * 1.5
 	MinSeqN = 0
 )
 const (
@@ -25,7 +25,7 @@ const (
 )
 const (
 	DefCongWinSize = MSS * 1
-	DefRecWinSize  = MSS * 10
+	DefRecWinSize  = MSS * 12 // 16384
 )
 const (
 	MSS = 1472 - 13

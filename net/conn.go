@@ -3,15 +3,15 @@ package net
 import (
 	"github.com/godaner/geronimo/rule"
 	v1 "github.com/godaner/geronimo/rule/v1"
-	v2 "github.com/godaner/geronimo/win/v2"
+	v12 "github.com/godaner/geronimo/win/v1"
 	"net"
 	"sync"
 	"time"
 )
 
 type GConn struct {
-	recvWin *v2.RWND
-	sendWin *v2.SWND
+	recvWin *v12.RWND
+	sendWin *v12.SWND
 	sync.Once
 	*net.UDPConn
 }
@@ -24,7 +24,7 @@ func Dial(laddr, raddr *net.UDPAddr) (c *GConn, err error) {
 }
 func (g *GConn) init() {
 	g.Do(func() {
-		g.recvWin = &v2.RWND{
+		g.recvWin = &v12.RWND{
 			AckSender: func(ack, receiveWinSize uint16) (err error) {
 				m := &v1.Message{}
 				m.ACK(ack, receiveWinSize)
@@ -33,7 +33,7 @@ func (g *GConn) init() {
 				return err
 			},
 		}
-		g.sendWin = &v2.SWND{
+		g.sendWin = &v12.SWND{
 			SegmentSender: func(firstSeq uint16, bs []byte) (err error) {
 				// send udp
 				m := &v1.Message{}

@@ -1,12 +1,13 @@
 package datastruct
 
 import (
+	"github.com/godaner/geronimo/rule"
 	"sync"
 	"sync/atomic"
 )
 
 const (
-	defSize = 65535
+	defSize = rule.DefRecWinSize*2
 )
 
 type ByteBlockChan struct {
