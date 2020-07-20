@@ -14,7 +14,7 @@ func TestSWND_Write(t *testing.T) {
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
 	swnd := SWND{
-		SendCallBack: func(firstSeq uint16, bs []byte) (err error) {
+		SegmentSender: func(firstSeq uint16, bs []byte) (err error) {
 			fmt.Println(firstSeq,string(bs))
 			return nil
 		},
@@ -34,13 +34,13 @@ func TestSWND_Write(t *testing.T) {
 	}()
 
 	time.Sleep(2 * time.Second)
-	swnd.Ack(2) // win = 9
+	swnd.AckSegment(2) // win = 9
 	fmt.Println("ack1")
 	time.Sleep(2 * time.Second)
-	swnd.Ack(4) // win = 9
+	swnd.AckSegment(4) // win = 9
 	fmt.Println("ack2")
 	//time.Sleep(5 * time.Second)
-	//swnd.Ack(11)
+	//swnd.AckSegment(11)
 	//fmt.Println("ack2")
 
 	time.Sleep(1000 * time.Hour)

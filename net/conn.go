@@ -25,7 +25,7 @@ func Dial(laddr, raddr *net.UDPAddr) (c *GConn, err error) {
 func (g *GConn) init() {
 	g.Do(func() {
 		g.recvWin = &v2.RWND{
-			AckCallBack: func(ack, receiveWinSize uint16) (err error) {
+			AckSender: func(ack, receiveWinSize uint16) (err error) {
 				m := &v1.Message{}
 				m.ACK(ack, receiveWinSize)
 				b := m.Marshall()
@@ -34,7 +34,7 @@ func (g *GConn) init() {
 			},
 		}
 		g.sendWin = &v2.SWND{
-			SendCallBack: func(firstSeq uint16, bs []byte) (err error) {
+			SegmentSender: func(firstSeq uint16, bs []byte) (err error) {
 				// send udp
 				m := &v1.Message{}
 				m.PAYLOAD(firstSeq, bs)
@@ -59,8 +59,7 @@ func (g *GConn) init() {
 					continue
 				}
 				if m.Flag()&rule.FlagACK == rule.FlagACK {
-					g.sendWin.SetSendWinSize(m.WinSize())
-					g.sendWin.Ack(m.AckN())
+					g.sendWin.AckSegment(m.WinSize(),m.AckN())
 					continue
 				}
 				panic("no handler")

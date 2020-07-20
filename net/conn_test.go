@@ -30,7 +30,7 @@ func TestGConn_Read(t *testing.T) {
 		Zone: "",
 	})
 	s:=[]byte{}
-	for i:=0;i<10;i++{
+	for i:=0;i<100;i++{
 		s=append(s,[]byte("kecasdadad")...)
 	}
 	go func() {

@@ -26,7 +26,7 @@ const (
 	quickResendIfAckGEN = 3
 )
 
-type SendCallBack func(firstSeq uint16, bs []byte) (err error)
+type SegmentSender func(firstSeq uint16, bs []byte) (err error)
 
 type SWND struct {
 	// status
@@ -38,7 +38,7 @@ type SWND struct {
 	headSeq     uint16 // current head seq , location is head
 	tailSeq     uint16 // current tail seq , location is tail
 	// outer
-	SendCallBack SendCallBack
+	SegmentSender SegmentSender
 	// helper
 	sync.Once
 	readySend            *datastruct.ByteBlockChan
@@ -61,31 +61,26 @@ func (s *SWND) Write(bs []byte) {
 	s.send()
 }
 
-// Ack
-func (s *SWND) Ack(ackNs ...uint16) {
+// AckSegment
+func (s *SWND) AckSegment(winSize uint16, ackNs ...uint16) {
 	s.init()
 	s.winLock.Lock()
+	s.sendWinSize = int64(winSize)
 	defer func() {
 		s.winLock.Unlock()
 		s.trimAck()
 		s.send()
 	}()
-	log.Println("SWND : recv ack is", ackNs, "recv win size is", s.sendWinSize)
+	log.Println("SWND : recv ack is", ackNs, ", recv win size is", s.sendWinSize)
 	// recv 0-3 => ack = 4
 	for _, ack := range ackNs {
-		m := s.quickResend(ack)
+		m := s.quickResendSegment(ack)
 		if m {
 			continue
 		}
 		s.ack(ack)
 	}
 
-}
-
-// SetSendWinSize
-func (s *SWND) SetSendWinSize(size uint16) {
-	s.init()
-	s.sendWinSize = int64(size)
 }
 
 func (s *SWND) init() {
@@ -127,7 +122,7 @@ func (s *SWND) send() {
 		if s.sendWinSize <= 0 {
 			return
 		}
-		bs := s.readSeg()
+		bs := s.readSegment()
 		if len(bs) <= 0 {
 			return
 		}
@@ -140,7 +135,7 @@ func (s *SWND) send() {
 			s.incTailSeq(1)
 		}
 		// set segment timeout
-		s.setSegResend(seqs, bs)
+		s.setSegmentResend(seqs, bs)
 		// win size
 		atomic.AddInt64(&s.sendWinSize, int64(-1*len(bs)))
 		// send
@@ -149,8 +144,8 @@ func (s *SWND) send() {
 	}
 }
 
-// setSegResend
-func (s *SWND) setSegResend(seqs []uint16, bs []byte) {
+// setSegmentResend
+func (s *SWND) setSegmentResend(seqs []uint16, bs []byte) {
 	lastSeq := seqs[len(seqs)-1]
 	firstSeq := seqs[0]
 	t := time.NewTicker(time.Duration(s.rto()) * time.Millisecond)
@@ -189,8 +184,8 @@ func (s *SWND) setSegResend(seqs []uint16, bs []byte) {
 	}()
 }
 
-// readSeg
-func (s *SWND) readSeg() (bs []byte) {
+// readSegment
+func (s *SWND) readSegment() (bs []byte) {
 	for i := 0; i < int(s.mss) && i < int(s.sendWinSize); i++ {
 		usable, b, _ := s.readySend.Pop()
 		if !usable {
@@ -204,7 +199,7 @@ func (s *SWND) readSeg() (bs []byte) {
 
 func (s *SWND) sendCallBack(tag string, firstSeq uint16, bs []byte) {
 	log.Println("SWND : send , tag is", tag, ", seq is [", firstSeq, ",", firstSeq+uint16(len(bs))-1, "]", ", win is", s.sendWinSize)
-	err := s.SendCallBack(firstSeq, bs)
+	err := s.SegmentSender(firstSeq, bs)
 	if err != nil {
 		log.Println("SWND : send , tag is", tag, ", err , err is", err.Error())
 	}
@@ -255,11 +250,11 @@ func (s *SWND) decSeq(seq *uint16, step uint16) {
 // rto
 //  retry time out
 func (s *SWND) rto() uint16 {
-	return 500
+	return 1000
 }
 
-// quickResend
-func (s *SWND) quickResend(ack uint16) (match bool) {
+// quickResendSegment
+func (s *SWND) quickResendSegment(ack uint16) (match bool) {
 
 	zero := uint8(0)
 	numI, _ := s.ackNum.LoadOrStore(ack, &zero)

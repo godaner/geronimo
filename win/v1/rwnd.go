@@ -25,7 +25,7 @@ const (
 	checkWinInterval = 10
 )
 
-type AckCallBack func(ack, receiveWinSize uint16) (err error)
+type AckSender func(ack, receiveWinSize uint16) (err error)
 
 // RWND
 //  Receive window
@@ -38,7 +38,7 @@ type RWND struct {
 	minSeq       uint16 // min seq
 	tailSeq      uint16 // current tail seq , location is tail
 	// outer
-	AckCallBack AckCallBack
+	AckSender AckSender
 	// helper
 	sync.Once
 	readyRecv       *sync.Map
@@ -178,7 +178,7 @@ func (r *RWND) ack(tag string, ackN *uint16) {
 		log.Println("RWND : tag is ", tag, ", set ackWin")
 		r.ackWin = true
 	}
-	err := r.AckCallBack(*ackN, rws)
+	err := r.AckSender(*ackN, rws)
 	if err != nil {
 		log.Println("RWND : tag is ", tag, ", ack callback err , err is", err.Error())
 	}
@@ -210,7 +210,7 @@ func (r *RWND) incRecvWinSize(step int32) (rws uint16) {
 	r.recvWinSizeLock.Lock()
 	defer r.recvWinSizeLock.Unlock()
 	r.recvWinSize += step
-	if r.recvWinSize>rule.DefWinSize{
+	if r.recvWinSize > rule.DefWinSize {
 		panic("fuck the window size")
 	}
 	r.figureRecvSeqRange()

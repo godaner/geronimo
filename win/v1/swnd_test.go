@@ -36,7 +36,7 @@ func TestSWND_Write(t *testing.T) {
 	fmt.Println("ack1")
 
 	//time.Sleep(5 * time.Second)
-	//swnd.Ack(11)
+	//swnd.AckSegment(11)
 	//fmt.Println("ack2")
 
 	time.Sleep(1000 * time.Hour)

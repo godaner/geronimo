@@ -13,7 +13,7 @@ func TestRWND_ReadFull(t *testing.T) {
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
 	rwnd := &RWND{
-		AckCallBack: func(ack, receiveWinSize uint16) (err error) {
+		AckSender: func(ack, receiveWinSize uint16) (err error) {
 			fmt.Println(ack, receiveWinSize)
 			return nil
 		},
