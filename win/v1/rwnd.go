@@ -46,8 +46,7 @@ type RWND struct {
 	tailSeqLock     sync.RWMutex
 	recvWinSizeLock sync.RWMutex
 	sync.RWMutex
-	winLock      sync.RWMutex
-	recvSeqRange *sync.Map
+	winLock sync.RWMutex
 }
 
 // rData
@@ -96,13 +95,20 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 func (r *RWND) RecvSegment(seqN uint16, bs []byte) {
 	r.init()
 	r.winLock.Lock()
-	defer r.winLock.Unlock()
+	s := time.Now().Unix()
+	defer func() {
+		r.winLock.Unlock()
+		log.Println("RWND : recv seq time is", time.Now().Unix()-s)
+	}()
 	log.Println("RWND : recv seq is [", seqN, ",", seqN+uint16(len(bs))-1, "]")
+	s1 := time.Now().Unix()
 	if !r.inRecvSeqRange(seqN) {
 		ackN := seqN + uint16(len(bs))
 		r.ack("4", &ackN)
 		return
 	}
+	log.Println("RWND : recv seq s1 time is", time.Now().Unix()-s1)
+	s2 := time.Now().Unix()
 	for index, b := range bs {
 		rdI, _ := r.readyRecv.LoadOrStore(seqN, &rData{})
 		rd := rdI.(*rData)
@@ -116,7 +122,10 @@ func (r *RWND) RecvSegment(seqN uint16, bs []byte) {
 		rd.isAlive = true
 		r.incSeq(&seqN, 1)
 	}
+	log.Println("RWND : recv seq s2 time is", time.Now().Unix()-s2)
+	s3 := time.Now().Unix()
 	r.recv()
+	log.Println("RWND : recv seq s3 time is", time.Now().Unix()-s3)
 }
 
 func (r *RWND) init() {
@@ -128,8 +137,6 @@ func (r *RWND) init() {
 		r.tailSeq = r.minSeq
 		r.recved = &datastruct.ByteBlockChan{Size: 0}
 		r.readyRecv = &sync.Map{}
-		r.recvSeqRange = &sync.Map{}
-		r.figureRecvSeqRange()
 		r.loopAckWin()
 		r.loopPrint()
 	})
@@ -184,20 +191,15 @@ func (r *RWND) ack(tag string, ackN *uint16) {
 	}
 }
 
-// figureRecvSeqRange
-func (r *RWND) figureRecvSeqRange() {
-	seq := r.getTailSeq()
-	r.recvSeqRange = &sync.Map{}
-	for i := 0; i < int(r.recvWinSize); i++ {
-		r.recvSeqRange.Store(seq, true)
-		r.incSeq(&seq, 1)
-	}
-}
-
 // inRecvSeqRange
 func (r *RWND) inRecvSeqRange(seq uint16) (yes bool) {
-	_, ok := r.recvSeqRange.Load(seq)
-	return ok
+	tailSeq := r.getTailSeq()
+	for i := 0; i < int(r.getRecvWinSize()); i++ {
+		if tailSeq == seq {
+			return true
+		}
+	}
+	return false
 }
 
 // incSeq
@@ -213,7 +215,7 @@ func (r *RWND) incRecvWinSize(step int32) (rws uint16) {
 	if r.recvWinSize > rule.DefWinSize {
 		panic("fuck the window size")
 	}
-	r.figureRecvSeqRange()
+	//r.changeRecvSeqRange(step)
 	return uint16(r.recvWinSize)
 }
 
@@ -241,7 +243,6 @@ func (r *RWND) getTailSeq() (tailSeq uint16) {
 	defer r.tailSeqLock.RUnlock()
 	return r.tailSeq
 }
-
 // loopPrint
 func (r *RWND) loopPrint() {
 	go func() {
