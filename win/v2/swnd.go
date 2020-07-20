@@ -6,6 +6,7 @@ import (
 	"github.com/godaner/geronimo/win/datastruct"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -13,7 +14,7 @@ import (
 // sws = 5
 // seq range = 0-5
 //               headSeq                               tailSeq
-//          	  head                                  tail                        currSendWinSize
+//          	  head                                  tail                        sendWinSize
 // list    <<------|-------|-------|------|-------|-------|-------|-------|-------|--------|--------|-----<< data flow
 //                 |                                      |                                |
 // sent and ack<===|==========>sent but not ack<==========|====>allow send but not send<===|===>not allow send
@@ -29,20 +30,17 @@ type SendCallBack func(firstSeq uint16, bs []byte) (err error)
 
 type SWND struct {
 	// status
-	sent            *datastruct.ByteBlockChan
-	currSendWinSize uint16 // current send window size , from "receive window size" or "congestion window size"
-	currRecvWinSize uint16 // current recv window size , from "recv"
-	mss             uint16 // mss
-	maxSeq          uint16 // max seq
-	minSeq          uint16 // min seq
-	headSeq         uint16 // current head seq , location is head
-	tailSeq         uint16 // current tail seq , location is tail
+	sent        *datastruct.ByteBlockChan
+	sendWinSize int64  // current send window size , from "receive window size" or "congestion window size"
+	mss         uint16 // mss
+	maxSeq      uint16 // max seq
+	minSeq      uint16 // min seq
+	headSeq     uint16 // current head seq , location is head
+	tailSeq     uint16 // current tail seq , location is tail
 	// outer
 	SendCallBack SendCallBack
 	// helper
 	sync.Once
-	//sendSig              chan bool // start send data to the list
-	//trimAckSig           chan bool // trim ack data
 	readySend            *datastruct.ByteBlockChan
 	segResendCancel      *sync.Map // for cancel resend
 	segResendImmediately *sync.Map // for resend
@@ -51,14 +49,14 @@ type SWND struct {
 	cancelResendResult   *sync.Map // for ack progress
 	tailSeqLock          sync.RWMutex
 	headSeqLock          sync.RWMutex
-	sync.RWMutex
+	winLock              sync.RWMutex
 }
 
 // Write
 func (s *SWND) Write(bs []byte) {
 	s.init()
 	for _, b := range bs {
-		s.readySend.Push(b)
+		s.readySend.BlockPush(b)
 	}
 	s.send()
 }
@@ -66,13 +64,13 @@ func (s *SWND) Write(bs []byte) {
 // Ack
 func (s *SWND) Ack(ackNs ...uint16) {
 	s.init()
-	s.Lock()
+	s.winLock.Lock()
 	defer func() {
-		s.Unlock()
+		s.winLock.Unlock()
 		s.trimAck()
 		s.send()
 	}()
-	log.Println("SWND : recv ack is", ackNs, "recv win size is", s.currSendWinSize)
+	log.Println("SWND : recv ack is", ackNs, "recv win size is", s.sendWinSize)
 	// recv 0-3 => ack = 4
 	for _, ack := range ackNs {
 		m := s.quickResend(ack)
@@ -87,14 +85,12 @@ func (s *SWND) Ack(ackNs ...uint16) {
 // SetSendWinSize
 func (s *SWND) SetSendWinSize(size uint16) {
 	s.init()
-	s.currRecvWinSize = size
-	s.currSendWinSize = s.currRecvWinSize
+	s.sendWinSize = int64(size)
 }
 
 func (s *SWND) init() {
 	s.Do(func() {
-		s.currSendWinSize = rule.DefWinSize
-		s.currRecvWinSize = s.currSendWinSize
+		s.sendWinSize = rule.DefWinSize
 		s.mss = rule.MSS
 		s.maxSeq = rule.MaxSeqN
 		s.minSeq = rule.MinSeqN
@@ -111,8 +107,8 @@ func (s *SWND) init() {
 	})
 }
 func (s *SWND) trimAck() {
-	s.Lock()
-	defer s.Unlock()
+	s.winLock.Lock()
+	defer s.winLock.Unlock()
 	for {
 		headSeq := s.getHeadSeq()
 		d, ok := s.ackSeqCache.Load(headSeq)
@@ -125,10 +121,10 @@ func (s *SWND) trimAck() {
 	}
 }
 func (s *SWND) send() {
-	s.Lock()
-	defer s.Unlock()
+	s.winLock.Lock()
+	defer s.winLock.Unlock()
 	for {
-		if !s.sendAble() {
+		if s.sendWinSize <= 0 {
 			return
 		}
 		bs := s.readSeg()
@@ -139,12 +135,14 @@ func (s *SWND) send() {
 		firstSeq := s.getTailSeq()
 		seqs := make([]uint16, 0)
 		for _, b := range bs {
-			s.sent.Push(b)
+			s.sent.BlockPush(b)
 			seqs = append(seqs, s.getTailSeq())
 			s.incTailSeq(1)
 		}
 		// set segment timeout
 		s.setSegResend(seqs, bs)
+		// win size
+		atomic.AddInt64(&s.sendWinSize, int64(-1*len(bs)))
 		// send
 		s.sendCallBack("1", firstSeq, bs)
 
@@ -193,7 +191,7 @@ func (s *SWND) setSegResend(seqs []uint16, bs []byte) {
 
 // readSeg
 func (s *SWND) readSeg() (bs []byte) {
-	for i := 0; i < int(s.mss); i++ {
+	for i := 0; i < int(s.mss) && i < int(s.sendWinSize); i++ {
 		usable, b, _ := s.readySend.Pop()
 		if !usable {
 			break
@@ -205,20 +203,11 @@ func (s *SWND) readSeg() (bs []byte) {
 }
 
 func (s *SWND) sendCallBack(tag string, firstSeq uint16, bs []byte) {
-	log.Println("SWND : send , tag is", tag, ", seq is [", firstSeq, ",", firstSeq+uint16(len(bs))-1, "]")
+	log.Println("SWND : send , tag is", tag, ", seq is [", firstSeq, ",", firstSeq+uint16(len(bs))-1, "]", ", win is", s.sendWinSize)
 	err := s.SendCallBack(firstSeq, bs)
 	if err != nil {
 		log.Println("SWND : send , tag is", tag, ", err , err is", err.Error())
 	}
-}
-
-// sendAble
-func (s *SWND) sendAble() (yes bool) {
-	sentLen, currSendWinSize := s.sent.Len(), uint32(s.currSendWinSize)
-	//defer func() {
-	//	log.Println("SWND : send able is", yes, ", sentLen is", sentLen, ", currSendWinSize is", currSendWinSize)
-	//}()
-	return sentLen < currSendWinSize
 }
 
 // incSeq
@@ -266,7 +255,7 @@ func (s *SWND) decSeq(seq *uint16, step uint16) {
 // rto
 //  retry time out
 func (s *SWND) rto() uint16 {
-	return 100
+	return 500
 }
 
 // quickResend
@@ -327,7 +316,7 @@ func (s *SWND) ack(ack uint16) {
 			return
 		case <-time.After(1000 * time.Millisecond):
 			log.Println("SWND : cancel resend timeout , origin ack is", originAck)
-			panic("cancel resend timeout , origin ack is" + fmt.Sprint(originAck))
+			panic("cancel resend timeout , origin ack is " + fmt.Sprint(originAck))
 		}
 		//case <-time.After(100 * time.Millisecond):
 		//	log.Println("SWND : no resend cancel be found , origin ack is", originAck)
@@ -339,7 +328,7 @@ func (s *SWND) ack(ack uint16) {
 func (s *SWND) loopPrint() {
 	go func() {
 		for {
-			log.Println("SWND : print , sent len is ", s.sent.Len(), ", readySend len is", s.readySend.Len(), ", send win size is", s.currSendWinSize)
+			log.Println("SWND : print , sent len is ", s.sent.Len(), ", readySend len is", s.readySend.Len(), ", send win size is", s.sendWinSize)
 			time.Sleep(1000 * time.Millisecond)
 		}
 	}()

@@ -6,7 +6,6 @@ import (
 	"github.com/godaner/geronimo/win/datastruct"
 	"log"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -23,7 +22,7 @@ import (
 //
 // index =   0       1       2      3       4       5       6       7        8         9         10
 const (
-	checkWinInterval = 250
+	checkWinInterval = 10
 )
 
 type AckCallBack func(ack, receiveWinSize uint16) (err error)
@@ -33,8 +32,8 @@ type AckCallBack func(ack, receiveWinSize uint16) (err error)
 type RWND struct {
 	// status
 	recved       *datastruct.ByteBlockChan
-	fixedWinSize uint16 // fixed window size . this is not "receive window size"
-	mss          uint16 // mss
+	fixedWinSize int64  // fixed window size . this is not "receive window size"
+	recvWinSize  int32  // recv window size
 	maxSeq       uint16 // max seq
 	minSeq       uint16 // min seq
 	tailSeq      uint16 // current tail seq , location is tail
@@ -42,13 +41,13 @@ type RWND struct {
 	AckCallBack AckCallBack
 	// helper
 	sync.Once
-	recvSig      chan bool // start recv data to the list
-	readyRecv    *sync.Map
-	readyRecvNum int64
-	ackWin       bool
-	tailSeqLock  sync.RWMutex
-	recvLock     sync.RWMutex
-	// todo no channel , win lock ,var window size
+	readyRecv       *sync.Map
+	ackWin          bool
+	tailSeqLock     sync.RWMutex
+	recvWinSizeLock sync.RWMutex
+	sync.RWMutex
+	winLock      sync.RWMutex
+	recvSeqRange *sync.Map
 }
 
 // rData
@@ -56,7 +55,7 @@ type rData struct {
 	b       byte
 	seq     uint16
 	needAck bool
-	deled   bool
+	isAlive bool
 }
 
 // String
@@ -65,13 +64,13 @@ func (r *rData) String() string {
 }
 
 // ReadFull
-func (r *RWND) ReadFull(bs []byte) (n int, err error) {
-	r.init()
-	for i := 0; i < len(bs); i++ {
-		bs[i], _ = r.recved.BlockPop()
-	}
-	return len(bs), nil
-}
+//func (r *RWND) ReadFull(bs []byte) (n int, err error) {
+//	r.init()
+//	for i := 0; i < len(bs); i++ {
+//		bs[i], _ = r.recved.BlockPop()
+//	}
+//	return len(bs), nil
+//}
 
 // Read
 func (r *RWND) Read(bs []byte) (n int, err error) {
@@ -88,7 +87,7 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 		}
 		bs[i] = b
 		n++
-		log.Println("RWND : read , win size is", r.recvWinSize())
+		//log.Println("RWND : read , win size is", r.getRecvWinSize(), ", char is", string(b))
 	}
 	return n, nil
 }
@@ -96,98 +95,75 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 // RecvSegment
 func (r *RWND) RecvSegment(seqN uint16, bs []byte) {
 	r.init()
-	r.recvLock.Lock()
-	defer r.recvLock.Unlock()
+	r.winLock.Lock()
+	defer r.winLock.Unlock()
 	log.Println("RWND : recv seq is [", seqN, ",", seqN+uint16(len(bs))-1, "]")
-	rdI, _ := r.readyRecv.LoadOrStore(seqN, &rData{})
-	rd := rdI.(*rData)
-	if rd.deled {
+	if !r.inRecvSeqRange(seqN) {
 		ackN := seqN + uint16(len(bs))
-		if len(bs) == 2 && bs[0] == bs[1] {
-			ackN = seqN + 1
-		}
 		r.ack("4", &ackN)
 		return
 	}
 	for index, b := range bs {
 		rdI, _ := r.readyRecv.LoadOrStore(seqN, &rData{})
 		rd := rdI.(*rData)
+		if !rd.isAlive { // not repeat
+			r.incRecvWinSize(-1)
+		}
+		// fill daata
 		rd.b = b
 		rd.seq = seqN
 		rd.needAck = index == (len(bs) - 1)
-		rd.deled = false
+		rd.isAlive = true
 		r.incSeq(&seqN, 1)
-		atomic.AddInt64(&r.readyRecvNum, 1)
 	}
-	r.recvSig <- true
-}
-
-// recvWinSize
-func (r *RWND) recvWinSize() uint16 {
-	i32 := int32(r.fixedWinSize) - int32(r.recved.Len()) - int32(r.readyRecvNum)
-	//i32 := int32(r.fixedWinSize) - int32(r.recved.Len())
-	if i32 <= 0 {
-		return 0
-	}
-	return uint16(i32)
+	r.recv()
 }
 
 func (r *RWND) init() {
 	r.Do(func() {
 		r.fixedWinSize = rule.DefWinSize
-		r.mss = rule.MSS
+		r.recvWinSize = int32(r.fixedWinSize)
 		r.maxSeq = rule.MaxSeqN
 		r.minSeq = rule.MinSeqN
 		r.tailSeq = r.minSeq
-		r.recved = &datastruct.ByteBlockChan{Size: 0} // todo ???? how much ????
-		r.recvSig = make(chan bool)
+		r.recved = &datastruct.ByteBlockChan{Size: 0}
 		r.readyRecv = &sync.Map{}
-		r.loopRecv()
+		r.recvSeqRange = &sync.Map{}
+		r.figureRecvSeqRange()
 		r.loopAckWin()
 		r.loopPrint()
 	})
 }
 
-// loopRecv
-func (r *RWND) loopRecv() {
-	f:=func() {
-		firstCycle := true // eg. if no firstCycle , cache have seq 9 , 9 ack will be sent twice
-		for {
-			tailSeq := r.getTailSeq()
-			di, _ := r.readyRecv.Load(tailSeq)
-			if di == nil {
-				if !firstCycle {
-					return
-				}
-				r.ack("1", nil)
+// recv
+func (r *RWND) recv() {
+	firstCycle := true // eg. if no firstCycle , cache have seq 9 , 9 ack will be sent twice
+	for {
+		tailSeq := r.getTailSeq()
+		di, _ := r.readyRecv.Load(tailSeq)
+		d, _ := di.(*rData)
+		if di == nil || !d.isAlive {
+			if !firstCycle {
 				return
 			}
-			firstCycle = false
-			d := di.(*rData)
-			// clear seq cache
-			r.readyRecv.Delete(tailSeq)
-			atomic.AddInt64(&r.readyRecvNum, -1)
-			// slide window , next seq
-			r.incTailSeq(1)
-			// put data to received
-			r.recved.Push(d.b)
-			// ack it
-			if d.needAck {
-				r.ack("2", nil)
-				return // segment end
-			}
+			r.ack("1", nil)
+			return
+		}
+		firstCycle = false
+		// clear seq cache
+		d.isAlive = false
+		// slide window , next seq
+		r.incTailSeq(1)
+		// put data to received
+		r.recved.BlockPush(d.b)
+		// reset window size
+		r.incRecvWinSize(1)
+		// ack it
+		if d.needAck {
+			r.ack("2", nil)
+			return // segment end
 		}
 	}
-	go func() {
-		for {
-			select {
-			case <-r.recvSig:
-				f()
-			//case <-time.After(250 * time.Millisecond):
-			//	f()
-			}
-		}
-	}()
 }
 
 // ack
@@ -196,7 +172,7 @@ func (r *RWND) ack(tag string, ackN *uint16) {
 		a := r.getTailSeq()
 		ackN = &a
 	}
-	rws := r.recvWinSize()
+	rws := r.getRecvWinSize()
 	log.Println("RWND : tag is ", tag, ", send ack , ack is", *ackN, " , win size is", rws)
 	if rws <= 0 {
 		log.Println("RWND : tag is ", tag, ", set ackWin")
@@ -208,9 +184,47 @@ func (r *RWND) ack(tag string, ackN *uint16) {
 	}
 }
 
+// figureRecvSeqRange
+func (r *RWND) figureRecvSeqRange() {
+	seq := r.getTailSeq()
+	r.recvSeqRange = &sync.Map{}
+	for i := 0; i < int(r.recvWinSize); i++ {
+		r.recvSeqRange.Store(seq, true)
+		r.incSeq(&seq, 1)
+	}
+}
+
+// inRecvSeqRange
+func (r *RWND) inRecvSeqRange(seq uint16) (yes bool) {
+	_, ok := r.recvSeqRange.Load(seq)
+	return ok
+}
+
 // incSeq
 func (r *RWND) incSeq(seq *uint16, step uint16) {
 	*seq = (*seq+step)%r.maxSeq + r.minSeq
+}
+
+// incRecvWinSize
+func (r *RWND) incRecvWinSize(step int32) (rws uint16) {
+	r.recvWinSizeLock.Lock()
+	defer r.recvWinSizeLock.Unlock()
+	r.recvWinSize += step
+	if r.recvWinSize>rule.DefWinSize{
+		panic("fuck the window size")
+	}
+	r.figureRecvSeqRange()
+	return uint16(r.recvWinSize)
+}
+
+// getRecvWinSize
+func (r *RWND) getRecvWinSize() (rws uint16) {
+	r.recvWinSizeLock.RLock()
+	defer r.recvWinSizeLock.RUnlock()
+	if r.recvWinSize < 0 {
+		return uint16(0)
+	}
+	return uint16(r.recvWinSize)
 }
 
 // incTailSeq
@@ -232,7 +246,7 @@ func (r *RWND) getTailSeq() (tailSeq uint16) {
 func (r *RWND) loopPrint() {
 	go func() {
 		for {
-			log.Println("RWND : print , recv win size is", r.recvWinSize(), ", readyRecvNum is", r.readyRecvNum, ", ackWin is", r.ackWin)
+			log.Println("RWND : print , recved len is", r.recved.Len(), ", recv win size is", r.getRecvWinSize(), ", ackWin is", r.ackWin)
 			//log.Println("RWND : recv win size is", r.recvWinSize())
 			time.Sleep(1000 * time.Millisecond)
 		}
@@ -247,8 +261,9 @@ func (r *RWND) loopAckWin() {
 		for {
 			select {
 			case <-t.C:
-				if r.ackWin && r.recvWinSize() > 0 {
-					log.Println("RWND : ack win , recv size is", r.recvWinSize())
+				rws := r.getRecvWinSize()
+				if r.ackWin && rws > 0 {
+					log.Println("RWND : ack win , recv size is", rws)
 					r.ackWin = false
 					r.ack("3", nil)
 				}

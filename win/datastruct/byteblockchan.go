@@ -52,8 +52,8 @@ func (b *ByteBlockChan) BlockPop() (byt byte, len uint32) {
 	return byt, uint32(b.len)
 }
 
-// Push
-func (b *ByteBlockChan) Push(byt byte) (len uint32) {
+// BlockPush
+func (b *ByteBlockChan) BlockPush(byt byte) (len uint32) {
 	b.init()
 	b.c <- byt
 	atomic.AddInt64(&b.len, 1)
