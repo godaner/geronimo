@@ -84,7 +84,7 @@ func (s *SWND) Ack(ackNs ...uint16) {
 
 func (s *SWND) init() {
 	s.Do(func() {
-		s.sws = rule.DefWinSize
+		s.sws = rule.DefCongWinSize
 		s.mss = rule.MSS
 		s.maxSeq = rule.MaxSeqN
 		s.minSeq = rule.MinSeqN

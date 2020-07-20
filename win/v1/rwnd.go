@@ -32,10 +32,7 @@ type AckSender func(ack, receiveWinSize uint16) (err error)
 type RWND struct {
 	// status
 	recved       *datastruct.ByteBlockChan
-	fixedWinSize int64  // fixed window size . this is not "receive window size"
 	recvWinSize  int32  // recv window size
-	maxSeq       uint16 // max seq
-	minSeq       uint16 // min seq
 	tailSeq      uint16 // current tail seq , location is tail
 	// outer
 	AckSender AckSender
@@ -95,20 +92,20 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 func (r *RWND) RecvSegment(seqN uint16, bs []byte) {
 	r.init()
 	r.winLock.Lock()
-	s := time.Now().Unix()
+	//s := time.Now().Unix()
 	defer func() {
 		r.winLock.Unlock()
-		log.Println("RWND : recv seq time is", time.Now().Unix()-s)
+		//log.Println("RWND : recv seq time is", time.Now().Unix()-s)
 	}()
 	log.Println("RWND : recv seq is [", seqN, ",", seqN+uint16(len(bs))-1, "]")
-	s1 := time.Now().Unix()
+	//s1 := time.Now().Unix()
 	if !r.inRecvSeqRange(seqN) {
 		ackN := seqN + uint16(len(bs))
 		r.ack("4", &ackN)
 		return
 	}
-	log.Println("RWND : recv seq s1 time is", time.Now().Unix()-s1)
-	s2 := time.Now().Unix()
+	//log.Println("RWND : recv seq s1 time is", time.Now().Unix()-s1)
+	//s2 := time.Now().Unix()
 	for index, b := range bs {
 		rdI, _ := r.readyRecv.LoadOrStore(seqN, &rData{})
 		rd := rdI.(*rData)
@@ -122,19 +119,16 @@ func (r *RWND) RecvSegment(seqN uint16, bs []byte) {
 		rd.isAlive = true
 		r.incSeq(&seqN, 1)
 	}
-	log.Println("RWND : recv seq s2 time is", time.Now().Unix()-s2)
-	s3 := time.Now().Unix()
+	//log.Println("RWND : recv seq s2 time is", time.Now().Unix()-s2)
+	//s3 := time.Now().Unix()
 	r.recv()
-	log.Println("RWND : recv seq s3 time is", time.Now().Unix()-s3)
+	//log.Println("RWND : recv seq s3 time is", time.Now().Unix()-s3)
 }
 
 func (r *RWND) init() {
 	r.Do(func() {
-		r.fixedWinSize = rule.DefWinSize
-		r.recvWinSize = int32(r.fixedWinSize)
-		r.maxSeq = rule.MaxSeqN
-		r.minSeq = rule.MinSeqN
-		r.tailSeq = r.minSeq
+		r.recvWinSize = int32(rule.DefRecWinSize)
+		r.tailSeq = rule.MinSeqN
 		r.recved = &datastruct.ByteBlockChan{Size: 0}
 		r.readyRecv = &sync.Map{}
 		r.loopAckWin()
@@ -204,7 +198,7 @@ func (r *RWND) inRecvSeqRange(seq uint16) (yes bool) {
 
 // incSeq
 func (r *RWND) incSeq(seq *uint16, step uint16) {
-	*seq = (*seq+step)%r.maxSeq + r.minSeq
+	*seq = (*seq+step)%rule.MaxSeqN + rule.MinSeqN
 }
 
 // incRecvWinSize
@@ -212,7 +206,7 @@ func (r *RWND) incRecvWinSize(step int32) (rws uint16) {
 	r.recvWinSizeLock.Lock()
 	defer r.recvWinSizeLock.Unlock()
 	r.recvWinSize += step
-	if r.recvWinSize > rule.DefWinSize {
+	if r.recvWinSize > rule.DefRecWinSize {
 		panic("fuck the window size")
 	}
 	//r.changeRecvSeqRange(step)
