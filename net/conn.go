@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+const (
+	udpmss      = 1472
+	syncTimeout = 2000
+)
+
 type GConn struct {
 	recvWin *v12.RWND
 	sendWin *v12.SWND
@@ -16,12 +21,6 @@ type GConn struct {
 	*net.UDPConn
 }
 
-func Dial(laddr, raddr *net.UDPAddr) (c *GConn, err error) {
-	conn, err := net.DialUDP("udp", laddr, raddr)
-	return &GConn{
-		UDPConn: conn,
-	}, nil
-}
 func (g *GConn) init() {
 	g.Do(func() {
 		g.recvWin = &v12.RWND{
@@ -45,7 +44,7 @@ func (g *GConn) init() {
 		}
 		go func() {
 			// recv udp
-			bs := make([]byte, 1472, 1472)
+			bs := make([]byte, udpmss, udpmss)
 			for {
 				_, err := g.UDPConn.Read(bs)
 				if err != nil {
@@ -58,7 +57,7 @@ func (g *GConn) init() {
 					continue
 				}
 				if m.Flag()&rule.FlagACK == rule.FlagACK {
-					g.sendWin.RecvAckSegment(m.WinSize(),m.AckN())
+					g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
 					continue
 				}
 				panic("no handler")
