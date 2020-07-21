@@ -3,6 +3,7 @@ package net
 import (
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"testing"
@@ -105,8 +106,8 @@ func s(){
 	fmt.Println(end.Unix() - begin.Unix())
 }
 func TestGConn_Read(t *testing.T) {
-	//devNull, _ := os.Open(os.DevNull)
-	//log.SetOutput(devNull)
+	devNull, _ := os.Open(os.DevNull)
+	log.SetOutput(devNull)
 	c1,_:=Dial(&net.UDPAddr{
 		IP:   net.ParseIP("192.168.6.6"),
 		Port: 1111,
