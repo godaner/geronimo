@@ -53,7 +53,7 @@ type SWND struct {
 	readySend            *datastruct.ByteBlockChan
 	segResendCancel      *sync.Map // for cancel resend
 	segResendImmediately *sync.Map // for resend
-	ackNum               *sync.Map // for quick resend
+	quickResendAckNum    *sync.Map // for quick resend
 	ackSeqCache          *sync.Map // for slide head to right
 	cancelResendResult   *sync.Map // for ack progress
 	tailSeqLock          sync.RWMutex
@@ -118,7 +118,7 @@ func (s *SWND) init() {
 		s.segResendCancel = &sync.Map{}
 		s.segResendImmediately = &sync.Map{}
 		s.cancelResendResult = &sync.Map{}
-		s.ackNum = &sync.Map{}
+		s.quickResendAckNum = &sync.Map{}
 		s.ackSeqCache = &sync.Map{}
 		s.clearReadySendTimer = time.NewTimer(checkWinInterval)
 		s.loopPrint()
@@ -143,11 +143,11 @@ func (s *SWND) send(checkMSS bool) {
 	s.winLock.Lock()
 	defer s.winLock.Unlock()
 	for {
-		ws := s.sendWinSize - int64(s.sent.Len())  // no win size to send
+		ws := s.sendWinSize - int64(s.sent.Len()) // no win size to send
 		if ws <= 0 {
 			return
 		}
-		if checkMSS && s.readySend.Len() < rule.MSS {// not enough to send
+		if checkMSS && s.readySend.Len() < rule.MSS { // not enough to send
 			return
 		}
 		bs := s.readSegment(checkMSS)
@@ -190,9 +190,9 @@ func (s *SWND) setSegmentResend(firstSeq, lastSeq uint32, bs []byte) {
 		defer func() {
 			rttme := time.Now().UnixNano()/1e6 - rttms
 			if s.ssthresh <= s.congWinSize {
-				s.congWinSize += rule.MSS // slow start
+				s.congWinSize += rule.MSS
 			} else {
-				s.congWinSize *= 2
+				s.congWinSize *= 2 // slow start
 			}
 			if s.congWinSize > rule.DefRecWinSize {
 				s.congWinSize = rule.DefRecWinSize
@@ -201,7 +201,7 @@ func (s *SWND) setSegmentResend(firstSeq, lastSeq uint32, bs []byte) {
 			s.comRTO(float64(rttme))
 			log.Println("SWND : rttm is", rttme, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", s.getRTO())
 			t.Stop()
-			s.resetAckNum(firstSeq)
+			s.resetQuickResendAckNum(firstSeq)
 			s.segResendCancel.Delete(lastSeq)
 			s.segResendImmediately.Delete(lastSeq)
 			seq := firstSeq
@@ -353,7 +353,7 @@ func (s *SWND) getRTO() (rto float64) {
 func (s *SWND) quickResendSegment(ack uint32) (match bool) {
 
 	zero := uint8(0)
-	numI, _ := s.ackNum.LoadOrStore(ack, &zero)
+	numI, _ := s.quickResendAckNum.LoadOrStore(ack, &zero)
 	num := numI.(*uint8)
 	*num++
 	if *num < quickResendIfAckGEN {
@@ -362,7 +362,7 @@ func (s *SWND) quickResendSegment(ack uint32) (match bool) {
 	ci, _ := s.segResendImmediately.Load(ack)
 	if ci == nil { // not data wait to send
 		*num = 0
-		log.Println("SWND : no resend to be find , ack is", ack)
+		log.Println("SWND : no resend to be find , maybe recv ack before , ack is", ack)
 		return false
 	}
 	c := ci.(chan bool)
@@ -371,15 +371,14 @@ func (s *SWND) quickResendSegment(ack uint32) (match bool) {
 	case <-time.After(100 * time.Millisecond):
 		log.Println("SWND : no resend imm be found , ack is", ack)
 	}
-	*num = 0
 	log.Println("SWND : quick resend seq is", ack)
 	return true
 }
 
-// resetAckNum
-func (s *SWND) resetAckNum(ack uint32) {
+// resetQuickResendAckNum
+func (s *SWND) resetQuickResendAckNum(ack uint32) {
 	zero := uint8(0)
-	numI, _ := s.ackNum.LoadOrStore(ack, &zero)
+	numI, _ := s.quickResendAckNum.LoadOrStore(ack, &zero)
 	num := numI.(*uint8)
 	*num = 0
 }
