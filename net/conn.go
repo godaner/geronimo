@@ -25,7 +25,7 @@ func Dial(laddr, raddr *net.UDPAddr) (c *GConn, err error) {
 func (g *GConn) init() {
 	g.Do(func() {
 		g.recvWin = &v12.RWND{
-			AckSender: func(ack, receiveWinSize uint16) (err error) {
+			AckSender: func(ack uint32, receiveWinSize uint16) (err error) {
 				m := &v1.Message{}
 				m.ACK(ack, receiveWinSize)
 				b := m.Marshall()
@@ -34,7 +34,7 @@ func (g *GConn) init() {
 			},
 		}
 		g.sendWin = &v12.SWND{
-			SegmentSender: func(firstSeq uint16, bs []byte) (err error) {
+			SegmentSender: func(firstSeq uint32, bs []byte) (err error) {
 				// send udp
 				m := &v1.Message{}
 				m.PAYLOAD(firstSeq, bs)

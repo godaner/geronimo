@@ -9,8 +9,8 @@ import (
 
 // Header
 type Header struct {
-	HSeqN    uint16
-	HAckN    uint16
+	HSeqN    uint32
+	HAckN    uint32
 	HFlag    uint8
 	HWinSize uint16
 	HAttrNum byte
@@ -24,11 +24,11 @@ func (h *Header) AttrNum() byte {
 	return h.HAttrNum
 }
 
-func (h *Header) AckN() uint16 {
+func (h *Header) AckN() uint32 {
 	return h.HAckN
 }
 
-func (h *Header) SeqN() uint16 {
+func (h *Header) SeqN() uint32 {
 	return h.HSeqN
 }
 
@@ -62,11 +62,11 @@ type Message struct {
 	AttrMaps map[byte][]byte
 }
 
-func (m *Message) SeqN() uint16 {
+func (m *Message) SeqN() uint32 {
 	return m.Header.SeqN()
 }
 
-func (m *Message) AckN() uint16 {
+func (m *Message) AckN() uint32 {
 	return m.Header.AckN()
 }
 
@@ -179,19 +179,19 @@ func (m *Message) UnMarshall(message []byte) (err error) {
 	return nil
 }
 
-func (m *Message) SYN(seqN uint16) {
+func (m *Message) SYN(seqN uint32) {
 	m.newMessage(rule.FlagSYN, seqN, 0, 0)
 }
-func (m *Message) SYNACK(seqN, ackN, winSize uint16) {
+func (m *Message) SYNACK(seqN, ackN uint32, winSize uint16) {
 	m.newMessage(rule.FlagSYN|rule.FlagACK, seqN, ackN, winSize)
 }
-func (m *Message) ACK(seqN, winSize uint16) {
+func (m *Message) ACK(seqN uint32, winSize uint16) {
 	m.newMessage(rule.FlagACK, 0, seqN, winSize)
 }
-func (m *Message) FINACK(seqN, ackN, winSize uint16) {
+func (m *Message) FINACK(seqN, ackN uint32, winSize uint16) {
 	m.newMessage(rule.FlagFIN|rule.FlagACK, seqN, ackN, winSize)
 }
-func (m *Message) PAYLOAD(seqN uint16, payload []byte) {
+func (m *Message) PAYLOAD(seqN uint32, payload []byte) {
 	m.newMessage(rule.FlagPAYLOAD, seqN, 0, 0)
 	m.Attr = []Attr{
 		{
@@ -200,10 +200,10 @@ func (m *Message) PAYLOAD(seqN uint16, payload []byte) {
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
-func (m *Message) SCANWIN(seqN uint16) {
+func (m *Message) SCANWIN(seqN uint32) {
 	m.newMessage(rule.FlagSCANWIN, seqN, 0, 0)
 }
-func (m *Message) newMessage(flag uint8, seqN, ackN, winSize uint16) {
+func (m *Message) newMessage(flag uint8, seqN, ackN uint32, winSize uint16) {
 	m.Header = Header{
 		HFlag:    flag,
 		HSeqN:    seqN,

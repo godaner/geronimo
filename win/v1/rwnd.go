@@ -25,7 +25,7 @@ const (
 	checkWinInterval = 10
 )
 
-type AckSender func(ack, receiveWinSize uint16) (err error)
+type AckSender func(ack uint32, receiveWinSize uint16) (err error)
 
 // RWND
 //  Receive window
@@ -33,7 +33,7 @@ type RWND struct {
 	// status
 	recved       *datastruct.ByteBlockChan
 	recvWinSize  int32  // recv window size
-	tailSeq      uint16 // current tail seq , location is tail
+	tailSeq      uint32 // current tail seq , location is tail
 	// outer
 	AckSender AckSender
 	// helper
@@ -42,14 +42,13 @@ type RWND struct {
 	ackWin          bool
 	tailSeqLock     sync.RWMutex
 	recvWinSizeLock sync.RWMutex
-	sync.RWMutex
 	winLock sync.RWMutex
 }
 
 // rData
 type rData struct {
 	b       byte
-	seq     uint16
+	seq     uint32
 	needAck bool
 	isAlive bool
 }
@@ -89,7 +88,7 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 }
 
 // RecvSegment
-func (r *RWND) RecvSegment(seqN uint16, bs []byte) {
+func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 	r.init()
 	r.winLock.Lock()
 	//s := time.Now().Unix()
@@ -97,7 +96,7 @@ func (r *RWND) RecvSegment(seqN uint16, bs []byte) {
 		r.winLock.Unlock()
 		//log.Println("RWND : recv seq time is", time.Now().Unix()-s)
 	}()
-	log.Println("RWND : recv seq is [", seqN, ",", seqN+uint16(len(bs))-1, "]")
+	log.Println("RWND : recv seq is [", seqN, ",", seqN+uint32(len(bs))-1, "]")
 	//s1 := time.Now().Unix()
 	if !r.inRecvSeqRange(seqN) {
 		ackN:=seqN
@@ -169,7 +168,7 @@ func (r *RWND) recv() {
 }
 
 // ack
-func (r *RWND) ack(tag string, ackN *uint16) {
+func (r *RWND) ack(tag string, ackN *uint32) {
 	if ackN == nil {
 		a := r.getTailSeq()
 		ackN = &a
@@ -187,7 +186,7 @@ func (r *RWND) ack(tag string, ackN *uint16) {
 }
 
 // inRecvSeqRange
-func (r *RWND) inRecvSeqRange(seq uint16) (yes bool) {
+func (r *RWND) inRecvSeqRange(seq uint32) (yes bool) {
 	tailSeq := r.getTailSeq()
 	for i := 0; i < int(r.getRecvWinSize()); i++ {
 		if tailSeq == seq {
@@ -198,8 +197,8 @@ func (r *RWND) inRecvSeqRange(seq uint16) (yes bool) {
 }
 
 // incSeq
-func (r *RWND) incSeq(seq *uint16, step uint16) {
-	*seq = (*seq+step)%rule.MaxSeqN + rule.MinSeqN
+func (r *RWND) incSeq(seq *uint32, step uint16) {
+	*seq = (*seq+uint32(step))%rule.MaxSeqN + rule.MinSeqN
 }
 
 // incRecvWinSize
@@ -225,7 +224,7 @@ func (r *RWND) getRecvWinSize() (rws uint16) {
 }
 
 // incTailSeq
-func (r *RWND) incTailSeq(step uint16) (tailSeq uint16) {
+func (r *RWND) incTailSeq(step uint16) (tailSeq uint32) {
 	r.tailSeqLock.Lock()
 	defer r.tailSeqLock.Unlock()
 	r.incSeq(&r.tailSeq, step)
@@ -233,7 +232,7 @@ func (r *RWND) incTailSeq(step uint16) (tailSeq uint16) {
 }
 
 // getTailSeq
-func (r *RWND) getTailSeq() (tailSeq uint16) {
+func (r *RWND) getTailSeq() (tailSeq uint32) {
 	r.tailSeqLock.RLock()
 	defer r.tailSeqLock.RUnlock()
 	return r.tailSeq

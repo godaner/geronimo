@@ -7,16 +7,16 @@ type Message interface {
 	AttributeByType(byte) []byte
 
 	// op
-	SYN(seqN uint16)
-	SYNACK(seqN, ackN, winSize uint16)
-	ACK(seqN, winSize uint16)
-	FINACK(seqN, ackN, winSize uint16)
-	PAYLOAD(seqN uint16, payload []byte)
-	SCANWIN(seqN uint16)
+	SYN(seqN uint32)
+	SYNACK(seqN, ackN uint32, winSize uint16)
+	ACK(seqN uint32, winSize uint16)
+	FINACK(seqN, ackN uint32, winSize uint16)
+	PAYLOAD(seqN uint32, payload []byte)
+	SCANWIN(seqN uint32)
 
 	// from head
-	SeqN() uint16
-	AckN() uint16
+	SeqN() uint32
+	AckN() uint32
 	Flag() byte
 	WinSize() uint16
 	AttrNum() byte
