@@ -30,7 +30,7 @@ func r(){
 		Zone: "",
 	})
 
-	file, err := os.Create("./test")
+	file, err := os.Create("./dst1")
 	if err != nil {
 		panic(err)
 	}
@@ -62,14 +62,14 @@ func s(){
 		Zone: "",
 	})
 
-	info, err := os.Stat("./source1")
+	info, err := os.Stat("./src1")
 	if err != nil {
 		panic(err)
 	}
 	size := info.Size()
 	fmt.Println(size)
 
-	file, err := os.Open("./source1")
+	file, err := os.Open("./src1")
 
 	if err != nil {
 		panic(err)
