@@ -1,0 +1,34 @@
+# Compiled Object files, Static and Dynamic libs (Shared Objects)
+src1
+dst1
+*.o
+*.a
+*.so
+.idea
+# Folders
+_obj
+_test
+
+# Architecture specific extensions/prefixes
+*.[568vq]
+[568vq].out
+
+*.cgo1.go
+*.cgo2.c
+_cgo_defun.c
+_cgo_gotypes.go
+_cgo_export.*
+_testmain.go
+.settings
+*.exe
+*.exe~
+*.test
+*.prof
+*.project
+*.vscode
+*.coverprofile
+.wercker
+
+
+# specific linux exec file cmd
+cmd
