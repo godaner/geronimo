@@ -80,7 +80,8 @@ func (g *GConn) Write(b []byte) (n int, err error) {
 }
 
 func (g *GConn) Close() error {
-	panic("implement me")
+	//panic("implement me")
+	return nil
 }
 
 func (g *GConn) LocalAddr() net.Addr {
