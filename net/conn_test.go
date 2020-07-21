@@ -82,7 +82,7 @@ func s(){
 		n, err := file.Read(b)
 		if err != nil {
 			//panic(err)
-			fmt.Println(err)
+			fmt.Println(err,n)
 			break
 		}
 		count += int64(n)

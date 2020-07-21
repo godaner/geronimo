@@ -30,19 +30,17 @@ type AckSender func(ack uint32, receiveWinSize uint16) (err error)
 // RWND
 //  Receive window
 type RWND struct {
-	// status
-	recved       *datastruct.ByteBlockChan
-	recvWinSize  int32  // recv window size
-	tailSeq      uint32 // current tail seq , location is tail
-	// outer
-	AckSender AckSender
-	// helper
 	sync.Once
-	readyRecv       map[uint32]*rData
-	ackWin          bool
-	//tailSeqLock     sync.RWMutex
-	//recvWinSizeLock sync.RWMutex
-	 sync.RWMutex
+	sync.RWMutex
+	// status
+	// outer
+	AckSender   AckSender
+	recved      *datastruct.ByteBlockChan
+	recvWinSize int32  // recv window size
+	tailSeq     uint32 // current tail seq , location is tail
+	// helper
+	readyRecv map[uint32]*rData
+	ackWin    bool
 }
 
 // rData
@@ -91,30 +89,22 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 	r.init()
 	r.Lock()
-	//s := time.Now().Unix()
-	defer func() {
-		r.Unlock()
-		//log.Println("RWND : recv seq time is", time.Now().Unix()-s)
-	}()
+	defer r.Unlock()
 	log.Println("RWND : recv seq is [", seqN, ",", seqN+uint32(len(bs))-1, "]")
 	//s1 := time.Now().Unix()
 	if !r.inRecvSeqRange(seqN) {
-		ackN:=seqN
-		r.incSeq(&ackN,uint16(len(bs)))
+		ackN := seqN
+		r.incSeq(&ackN, uint16(len(bs)))
 		r.ack("4", &ackN)
 		return
 	}
-	//log.Println("RWND : recv seq s1 time is", time.Now().Unix()-s1)
-	//s2 := time.Now().Unix()
 	for index, b := range bs {
-		rd,ok:=r.readyRecv[seqN]
-		//rdI, _ := r.readyRecv.LoadOrStore(seqN, &rData{})
-		//rd := rdI.(*rData)
-		if !ok{
-			rd=&rData{}
-			r.readyRecv[seqN]=rd
+		rd, ok := r.readyRecv[seqN]
+		if !ok {
+			rd = &rData{}
+			r.readyRecv[seqN] = rd
 		}
-		if !ok||!rd.isAlive { // not repeat
+		if !ok || !rd.isAlive { // not repeat
 			r.incRecvWinSize(-1)
 		}
 		// fill daata
@@ -124,10 +114,7 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 		rd.isAlive = true
 		r.incSeq(&seqN, 1)
 	}
-	//log.Println("RWND : recv seq s2 time is", time.Now().Unix()-s2)
-	//s3 := time.Now().Unix()
 	r.recv()
-	//log.Println("RWND : recv seq s3 time is", time.Now().Unix()-s3)
 }
 
 func (r *RWND) init() {
@@ -145,10 +132,8 @@ func (r *RWND) init() {
 func (r *RWND) recv() {
 	firstCycle := true // eg. if no firstCycle , cache have seq 9 , 9 ack will be sent twice
 	for {
-		tailSeq := r.getTailSeq()
-		d:=r.readyRecv[tailSeq]
-		//di, _ := r.readyRecv.Load(tailSeq)
-		//d, _ := di.(*rData)
+		tailSeq := r.tailSeq
+		d := r.readyRecv[tailSeq]
 		if d == nil || !d.isAlive {
 			if !firstCycle {
 				return
@@ -160,7 +145,7 @@ func (r *RWND) recv() {
 		// clear seq cache
 		d.isAlive = false
 		// slide window , next seq
-		r.incTailSeq(1)
+		r.incSeq(&r.tailSeq, 1)
 		// put data to received
 		r.recved.BlockPush(d.b)
 		// reset window size
@@ -176,7 +161,7 @@ func (r *RWND) recv() {
 // ack
 func (r *RWND) ack(tag string, ackN *uint32) {
 	if ackN == nil {
-		a := r.getTailSeq()
+		a := r.tailSeq
 		ackN = &a
 	}
 	rws := r.getRecvWinSize()
@@ -193,7 +178,7 @@ func (r *RWND) ack(tag string, ackN *uint32) {
 
 // inRecvSeqRange
 func (r *RWND) inRecvSeqRange(seq uint32) (yes bool) {
-	tailSeq := r.getTailSeq()
+	tailSeq := r.tailSeq
 	for i := 0; i < int(r.getRecvWinSize()); i++ {
 		if tailSeq == seq {
 			return true
@@ -209,40 +194,21 @@ func (r *RWND) incSeq(seq *uint32, step uint16) {
 
 // incRecvWinSize
 func (r *RWND) incRecvWinSize(step int32) (rws uint16) {
-	//r.recvWinSizeLock.Lock()
-	//defer r.recvWinSizeLock.Unlock()
 	r.recvWinSize += step
 	if r.recvWinSize > rule.DefRecWinSize {
 		panic("fuck the window size")
 	}
-	//r.changeRecvSeqRange(step)
 	return uint16(r.recvWinSize)
 }
 
 // getRecvWinSize
 func (r *RWND) getRecvWinSize() (rws uint16) {
-	//r.recvWinSizeLock.RLock()
-	//defer r.recvWinSizeLock.RUnlock()
 	if r.recvWinSize < 0 {
 		return uint16(0)
 	}
 	return uint16(r.recvWinSize)
 }
 
-// incTailSeq
-func (r *RWND) incTailSeq(step uint16) (tailSeq uint32) {
-	//r.tailSeqLock.Lock()
-	//defer r.tailSeqLock.Unlock()
-	r.incSeq(&r.tailSeq, step)
-	return r.tailSeq
-}
-
-// getTailSeq
-func (r *RWND) getTailSeq() (tailSeq uint32) {
-	//r.tailSeqLock.RLock()
-	//defer r.tailSeqLock.RUnlock()
-	return r.tailSeq
-}
 // loopPrint
 func (r *RWND) loopPrint() {
 	go func() {

@@ -38,6 +38,10 @@ const (
 type SegmentSender func(firstSeq uint32, bs []byte) (err error)
 
 type SWND struct {
+	sync.Once
+	sync.RWMutex
+	// outer
+	SegmentSender SegmentSender
 	// status
 	sent        *datastruct.ByteBlockChan
 	sendWinSize int64  // send window size , from "congestion window size" or receive window size
@@ -46,23 +50,16 @@ type SWND struct {
 	headSeq     uint32 // current head seq , location is head
 	tailSeq     uint32 // current tail seq , location is tail
 	ssthresh    int64  // ssthresh
-	// outer
-	SegmentSender SegmentSender
 	// helper
-	readySend          *datastruct.ByteBlockChan
-	segResendCancel    map[uint32]chan bool // for cancel resend
-	segResendQuick     map[uint32]chan bool // for quick resend
-	quickResendAckNum  map[uint32]*uint8    // for quick resend
-	cancelResendResult map[uint32]chan bool // for ack progress
-	ackSeqCache        map[uint32]bool      // for slide head to right
-	//tailSeqLock         sync.RWMutex
-	//headSeqLock         sync.RWMutex
-	sync.RWMutex
-	sync.Once
-	rtts float64
-	rttd float64
-	rto  float64
-	//rtoLock             sync.RWMutex
+	readySend           *datastruct.ByteBlockChan
+	segResendCancel     map[uint32]chan bool // for cancel resend
+	segResendQuick      map[uint32]chan bool // for quick resend
+	quickResendAckNum   map[uint32]*uint8    // for quick resend
+	cancelResendResult  map[uint32]chan bool // for ack progress
+	ackSeqCache         map[uint32]bool      // for slide head to right
+	rtts                float64
+	rttd                float64
+	rto                 float64
 	clearReadySendTimer *time.Timer
 }
 
@@ -129,14 +126,14 @@ func (s *SWND) trimAck() {
 	s.Lock()
 	defer s.Unlock()
 	for {
-		headSeq := s.getHeadSeq()
+		headSeq := s.headSeq
 		_, ok := s.ackSeqCache[headSeq]
 		if !ok {
 			return
 		}
 		s.sent.BlockPop()
 		delete(s.ackSeqCache, headSeq)
-		s.incHeadSeq(1)
+		s.incSeq(&s.headSeq, 1)
 	}
 }
 func (s *SWND) send(checkMSS bool) {
@@ -156,13 +153,13 @@ func (s *SWND) send(checkMSS bool) {
 		}
 		s.clearReadySendTimer.Reset(clearReadySendInterval) // reset clear ready send timeout
 		// push to sent collection
-		firstSeq := s.getTailSeq()
+		firstSeq := s.tailSeq
 		for _, b := range bs {
 			s.sent.BlockPush(b)
-			s.incTailSeq(1)
+			s.incSeq(&s.tailSeq, 1)
 		}
 		// set segment timeout
-		lastSeq := s.getTailSeq()
+		lastSeq := s.tailSeq
 		s.decSeq(&lastSeq, 1)
 		s.setSegmentResend(firstSeq, lastSeq, bs)
 		// send
@@ -178,10 +175,6 @@ func (s *SWND) setSegmentResend(firstSeq, lastSeq uint32, bs []byte) {
 	s.segResendCancel[lastSeq] = reSendCancel
 	reSendQuick := make(chan bool)
 	s.segResendQuick[lastSeq] = reSendQuick
-	//reSendCancelI, _ := s.segResendCancel.LoadOrStore(lastSeq, make(chan bool))
-	//reSendImmediatelyI, _ := s.segResendQuick.LoadOrStore(lastSeq, make(chan bool))
-	//reSendCancel := reSendCancelI.(chan bool)
-	//reSendImmediately := reSendImmediatelyI.(chan bool)
 	select {
 	case <-reSendCancel:
 		panic("fuck ! who repeat this ?")
@@ -213,7 +206,6 @@ func (s *SWND) setSegmentResend(firstSeq, lastSeq uint32, bs []byte) {
 			s.incSeq(&end, 1)
 			for {
 				s.ackSeqCache[seq] = true
-				//s.ackSeqCache.Store(seq, true)
 				s.incSeq(&seq, 1)
 				if seq == end {
 					break
@@ -221,9 +213,6 @@ func (s *SWND) setSegmentResend(firstSeq, lastSeq uint32, bs []byte) {
 			}
 			// cancel result
 			s.cancelResendResult[lastSeq] <- true
-			//rI, _ := s.cancelResendResult.LoadOrStore(lastSeq, make(chan bool))
-			//r := rI.(chan bool)
-			//r <- true
 		}()
 		for {
 			select {
@@ -275,36 +264,6 @@ func (s *SWND) sendCallBack(tag string, firstSeq uint32, bs []byte) {
 	}
 }
 
-// incTailSeq
-func (s *SWND) incTailSeq(step uint16) (tailSeq uint32) {
-	//s.tailSeqLock.Lock()
-	//defer s.tailSeqLock.Unlock()
-	s.incSeq(&s.tailSeq, step)
-	return s.tailSeq
-}
-
-// getTailSeq
-func (s *SWND) getTailSeq() (tailSeq uint32) {
-	//s.tailSeqLock.RLock()
-	//defer s.tailSeqLock.RUnlock()
-	return s.tailSeq
-}
-
-// incHeadSeq
-func (s *SWND) incHeadSeq(step uint16) (headSeq uint32) {
-	//s.headSeqLock.Lock()
-	//defer s.headSeqLock.Unlock()
-	s.incSeq(&s.headSeq, step)
-	return s.headSeq
-}
-
-// getHeadSeq
-func (s *SWND) getHeadSeq() (headSeq uint32) {
-	//s.headSeqLock.RLock()
-	//defer s.headSeqLock.RUnlock()
-	return s.headSeq
-}
-
 // incSeq
 func (s *SWND) incSeq(seq *uint32, step uint16) {
 	*seq = (*seq+uint32(step))%rule.MaxSeqN + rule.MinSeqN
@@ -322,8 +281,6 @@ func (s *SWND) decSeq(seq *uint32, step uint16) {
 
 // comRTO
 func (s *SWND) comRTO(rttm float64) {
-	//s.rtoLock.Lock()
-	//defer s.rtoLock.Unlock()
 	s.rtts = (1-rtts_a)*s.rtts + rtts_a*rttm
 	s.rttd = (1-rttd_b)*s.rttd + rttd_b*math.Abs(rttm-s.rtts)
 	s.rto = s.rtts + 4*s.rttd
@@ -337,8 +294,6 @@ func (s *SWND) comRTO(rttm float64) {
 
 // incRTO
 func (s *SWND) incRTO() {
-	//s.rtoLock.Lock()
-	//defer s.rtoLock.Unlock()
 	s.rto = 2 * s.rto
 	if s.rto < min_rto {
 		s.rto = min_rto
@@ -350,8 +305,6 @@ func (s *SWND) incRTO() {
 
 // getRTO
 func (s *SWND) getRTO() (rto float64) {
-	//s.rtoLock.RLock()
-	//defer s.rtoLock.RUnlock()
 	return s.rto
 }
 
@@ -359,8 +312,6 @@ func (s *SWND) getRTO() (rto float64) {
 func (s *SWND) quickResendSegment(ack uint32) (match bool) {
 	zero := uint8(0)
 	num, ok := s.quickResendAckNum[ack]
-	//numI, _ := s.quickResendAckNum.LoadOrStore(ack, &zero)
-	//num := numI.(*uint8)
 	if !ok {
 		num = &zero
 	}
@@ -385,15 +336,11 @@ func (s *SWND) quickResendSegment(ack uint32) (match bool) {
 
 // resetQuickResendAckNum
 func (s *SWND) resetQuickResendAckNum(ack uint32) {
-	//zero := uint8(0)
 	num, ok := s.quickResendAckNum[ack]
 	if !ok {
 		return
 	}
 	*num = 0
-	//numI, _ := s.quickResendAckNum.LoadOrStore(ack, &zero)
-	//num := numI.(*uint8)
-	//*num = 0
 }
 
 // ack
@@ -401,7 +348,6 @@ func (s *SWND) ack(ack uint32) {
 	originAck := ack
 	s.decSeq(&ack, 1)
 	ci, ok := s.segResendCancel[ack]
-	//ci, _ := s.segResendCancel.Load(ack)
 	if !ok {
 		log.Println("SWND : no be ack find , decack is", ack)
 		return
@@ -409,8 +355,6 @@ func (s *SWND) ack(ack uint32) {
 	// cancel result
 	r := make(chan bool)
 	s.cancelResendResult[ack] = r
-	//rI, _ := s.cancelResendResult.LoadOrStore(ack, make(chan bool))
-	//r := rI.(chan bool)
 
 	select {
 	case ci <- true:
