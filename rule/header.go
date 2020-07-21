@@ -25,13 +25,13 @@ const (
 )
 const (
 	DefCongWinSize = MSS * 1
-	DefRecWinSize  = MSS * 12 // 16384
+	DefRecWinSize  = MSS * 24 // MSS*12=17508 ,
 )
 const (
-	MSS = 1472 - 13
+	MSS = 1472 - 13 // 1459
 )
 const (
-	DefSsthresh = MSS * 4
+	DefSsthresh = MSS * 12
 )
 
 type Header interface {

@@ -9,7 +9,13 @@ import (
 	"testing"
 	"time"
 )
-
+func TestDial(t *testing.T) {
+	s:=uint64(20426)
+	max:=uint64(52524)
+	//min:=uint64(0)
+	c:=(s-1+max)%max
+	fmt.Println(c)
+}
 func TestGConn_Read(t *testing.T) {
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)

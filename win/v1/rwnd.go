@@ -100,7 +100,8 @@ func (r *RWND) RecvSegment(seqN uint16, bs []byte) {
 	log.Println("RWND : recv seq is [", seqN, ",", seqN+uint16(len(bs))-1, "]")
 	//s1 := time.Now().Unix()
 	if !r.inRecvSeqRange(seqN) {
-		ackN := seqN + uint16(len(bs))
+		ackN:=seqN
+		r.incSeq(&ackN,uint16(len(bs)))
 		r.ack("4", &ackN)
 		return
 	}

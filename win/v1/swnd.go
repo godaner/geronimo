@@ -28,10 +28,10 @@ const (
 const (
 	rtts_a  = float64(0.125)
 	rttd_b  = float64(0.25)
-	def_rto = float64(1000)
-	def_rtt = float64(500)
-	min_rto = float64(1)
-	max_rto = float64(3000)
+	def_rto = float64(1000) // ms
+	def_rtt = float64(500)  // ms
+	min_rto = float64(10)   // ms
+	max_rto = float64(3000) // ms
 )
 
 type SegmentSender func(firstSeq uint16, bs []byte) (err error)
@@ -95,6 +95,7 @@ func (s *SWND) RecvAckSegment(winSize uint16, ackNs ...uint16) {
 	}
 
 }
+
 // comSendWinSize
 func (s *SWND) comSendWinSize() {
 	s.sendWinSize = int64(math.Min(float64(s.recvWinSize), float64(s.congWinSize)))
@@ -138,7 +139,8 @@ func (s *SWND) send() {
 	s.winLock.Lock()
 	defer s.winLock.Unlock()
 	for {
-		if s.sendWinSize-int64(s.sent.Len()) <= 0 {
+		ws := s.sendWinSize - int64(s.sent.Len())
+		if ws <= 0 {
 			return
 		}
 		bs := s.readSegment()
@@ -147,14 +149,14 @@ func (s *SWND) send() {
 		}
 		// push to sent collection
 		firstSeq := s.getTailSeq()
-		seqs := make([]uint16, 0)
 		for _, b := range bs {
 			s.sent.BlockPush(b)
-			seqs = append(seqs, s.getTailSeq())
 			s.incTailSeq(1)
 		}
 		// set segment timeout
-		s.setSegmentResend(seqs, bs)
+		lastSeq:=s.getTailSeq()
+		s.decSeq(&lastSeq,1)
+		s.setSegmentResend(firstSeq, lastSeq, bs)
 		// send
 		s.sendCallBack("1", firstSeq, bs)
 
@@ -162,9 +164,7 @@ func (s *SWND) send() {
 }
 
 // setSegmentResend
-func (s *SWND) setSegmentResend(seqs []uint16, bs []byte) {
-	lastSeq := seqs[len(seqs)-1]
-	firstSeq := seqs[0]
+func (s *SWND) setSegmentResend(firstSeq, lastSeq uint16, bs []byte) {
 	t := time.NewTimer(time.Duration(int64(s.getRTO())) * time.Millisecond)
 	reSendCancelI, _ := s.segResendCancel.LoadOrStore(lastSeq, make(chan bool))
 	reSendImmediatelyI, _ := s.segResendImmediately.LoadOrStore(lastSeq, make(chan bool))
@@ -177,27 +177,34 @@ func (s *SWND) setSegmentResend(seqs []uint16, bs []byte) {
 	}
 
 	rttms := time.Now().UnixNano() / 1e6 // ms
-	log.Println("SWND : set resend progress success , seqs is ", seqs, ", lastSeq is :", lastSeq)
+	log.Println("SWND : set resend progress success , seq is [", firstSeq, ",", lastSeq, "]")
 	go func() {
 		defer func() {
 			rttme := time.Now().UnixNano()/1e6 - rttms
 			if s.ssthresh <= s.congWinSize {
 				s.congWinSize += rule.MSS // slow start
 			} else {
-				s.congWinSize *= 2 * rule.MSS
+				s.congWinSize *= 2
 			}
 			if s.congWinSize > rule.DefRecWinSize {
 				s.congWinSize = rule.DefRecWinSize
 			}
 			s.comSendWinSize()
-			log.Println("SWND : rttm is", rttme, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize)
 			s.comRTO(float64(rttme))
+			log.Println("SWND : rttm is", rttme, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", s.getRTO())
 			t.Stop()
 			s.resetAckNum(firstSeq)
 			s.segResendCancel.Delete(lastSeq)
 			s.segResendImmediately.Delete(lastSeq)
-			for _, seq := range seqs {
+			seq := firstSeq
+			end := lastSeq
+			s.incSeq(&end, 1)
+			for {
 				s.ackSeqCache.Store(seq, true)
+				s.incSeq(&seq, 1)
+				if seq == end {
+					break
+				}
 			}
 			// cancel result
 			rI, _ := s.cancelResendResult.LoadOrStore(lastSeq, make(chan bool))
@@ -244,7 +251,7 @@ func (s *SWND) readSegment() (bs []byte) {
 }
 
 func (s *SWND) sendCallBack(tag string, firstSeq uint16, bs []byte) {
-	log.Println("SWND : send , tag is", tag, ", seq is [", firstSeq, ",", firstSeq+uint16(len(bs))-1, "]", ", send win is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", s.getRTO())
+	log.Println("SWND : send , tag is", tag, ", seq is [", firstSeq, ",", firstSeq+uint16(len(bs))-1, "]", ", readySend len is", s.readySend.Len(), ", sent len is", s.sent.Len(), ", send win is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", s.getRTO())
 	err := s.SegmentSender(firstSeq, bs)
 	if err != nil {
 		log.Println("SWND : send , tag is", tag, ", err , err is", err.Error())
@@ -288,7 +295,12 @@ func (s *SWND) getHeadSeq() (headSeq uint16) {
 
 // decSeq
 func (s *SWND) decSeq(seq *uint16, step uint16) {
-	*seq = ((*seq + rule.MaxSeqN) - step) % rule.MaxSeqN
+	//fmt.Println("seq ", *seq, "max ", rule.MaxSeqN, "min ", rule.MinSeqN)
+	seq64 := uint64(*seq)
+	maxSeq64 := uint64(rule.MaxSeqN)
+	step64:=uint64(step)
+	*seq = uint16((seq64 + maxSeq64 - step64) % maxSeq64)
+	//fmt.Println("seq ", *seq, "max ", rule.MaxSeqN, "min ", rule.MinSeqN)
 	// (0+8-1)%8 = 7
 	// (5+8-1)%8 = 4
 }
@@ -398,7 +410,7 @@ func (s *SWND) ack(ack uint16) {
 func (s *SWND) loopPrint() {
 	go func() {
 		for {
-			log.Println("SWND : print , sent len is ", s.sent.Len(), ", readySend len is", s.readySend.Len(), ", send win size is", s.sendWinSize, ", recv win size is", s.recvWinSize, ", cong win size is", s.congWinSize)
+			log.Println("SWND : print , sent len is ", s.sent.Len(), ", readySend len is", s.readySend.Len(), ", send win size is", s.sendWinSize, ", recv win size is", s.recvWinSize, ", cong win size is", s.congWinSize, ", rto is", s.getRTO())
 			time.Sleep(1000 * time.Millisecond)
 		}
 	}()
