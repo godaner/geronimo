@@ -44,6 +44,7 @@ func TestGConn_Read(t *testing.T) {
 	go func() {
 		for ; ;  {
 			c1.Write(s)
+			//return
 			//time.Sleep(1*time.Millisecond)
 		}
 	}()

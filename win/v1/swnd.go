@@ -23,14 +23,15 @@ import (
 //
 // index =         0       1       2      3       4       5       6       7        8       9       10
 const (
-	quickResendIfAckGEN = 3
+	quickResendIfAckGEN    = 3
+	clearReadySendInterval = 100
 )
 const (
 	rtts_a  = float64(0.125)
 	rttd_b  = float64(0.25)
 	def_rto = float64(1000) // ms
 	def_rtt = float64(500)  // ms
-	min_rto = float64(1)   // ms
+	min_rto = float64(1)    // ms
 	max_rto = float64(3000) // ms
 )
 
@@ -62,6 +63,7 @@ type SWND struct {
 	rttd                 float64
 	rto                  float64
 	rtoLock              sync.RWMutex
+	clearReadySendTimer  *time.Timer
 }
 
 // Write
@@ -70,7 +72,7 @@ func (s *SWND) Write(bs []byte) {
 	for _, b := range bs {
 		s.readySend.BlockPush(b)
 	}
-	s.send()
+	s.send(true)
 }
 
 // RecvAckSegment
@@ -82,7 +84,7 @@ func (s *SWND) RecvAckSegment(winSize uint16, ackNs ...uint32) {
 	defer func() {
 		s.winLock.Unlock()
 		s.trimAck()
-		s.send()
+		s.send(true)
 	}()
 	log.Println("SWND : recv ack is", ackNs, ", recv win size is", s.recvWinSize)
 	// recv 0-3 => ack = 4
@@ -118,7 +120,9 @@ func (s *SWND) init() {
 		s.cancelResendResult = &sync.Map{}
 		s.ackNum = &sync.Map{}
 		s.ackSeqCache = &sync.Map{}
+		s.clearReadySendTimer = time.NewTimer(checkWinInterval)
 		s.loopPrint()
+		s.clearReadySend()
 	})
 }
 func (s *SWND) trimAck() {
@@ -135,18 +139,22 @@ func (s *SWND) trimAck() {
 		s.incHeadSeq(1)
 	}
 }
-func (s *SWND) send() {
+func (s *SWND) send(checkMSS bool) {
 	s.winLock.Lock()
 	defer s.winLock.Unlock()
 	for {
-		ws := s.sendWinSize - int64(s.sent.Len())
+		ws := s.sendWinSize - int64(s.sent.Len())  // no win size to send
 		if ws <= 0 {
 			return
 		}
-		bs := s.readSegment()
+		if checkMSS && s.readySend.Len() < rule.MSS {// not enough to send
+			return
+		}
+		bs := s.readSegment(checkMSS)
 		if len(bs) <= 0 {
 			return
 		}
+		s.clearReadySendTimer.Reset(clearReadySendInterval) // reset clear ready send timeout
 		// push to sent collection
 		firstSeq := s.getTailSeq()
 		for _, b := range bs {
@@ -154,8 +162,8 @@ func (s *SWND) send() {
 			s.incTailSeq(1)
 		}
 		// set segment timeout
-		lastSeq:=s.getTailSeq()
-		s.decSeq(&lastSeq,1)
+		lastSeq := s.getTailSeq()
+		s.decSeq(&lastSeq, 1)
 		s.setSegmentResend(firstSeq, lastSeq, bs)
 		// send
 		s.sendCallBack("1", firstSeq, bs)
@@ -237,7 +245,10 @@ func (s *SWND) setSegmentResend(firstSeq, lastSeq uint32, bs []byte) {
 }
 
 // readSegment
-func (s *SWND) readSegment() (bs []byte) {
+func (s *SWND) readSegment(checkMSS bool) (bs []byte) {
+	if checkMSS && s.readySend.Len() < rule.MSS {
+		return
+	}
 	ws := int(s.sendWinSize - int64(s.sent.Len()))
 	for i := 0; i < rule.MSS && i < ws; i++ {
 		usable, b, _ := s.readySend.Pop()
@@ -413,4 +424,15 @@ func (s *SWND) loopPrint() {
 		}
 	}()
 
+}
+
+func (s *SWND) clearReadySend() {
+	go func() {
+		for {
+			select {
+			case <-s.clearReadySendTimer.C:
+				s.send(false)
+			}
+		}
+	}()
 }

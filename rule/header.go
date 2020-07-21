@@ -28,7 +28,7 @@ const (
 	MSS = 1472 - 17 // 1455
 )
 const (
-	DefSsthresh = MSS * 16
+	DefSsthresh = MSS * 8
 )
 
 type Header interface {
