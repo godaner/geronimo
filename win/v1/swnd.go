@@ -73,18 +73,12 @@ func (s *SWND) Write(bs []byte) {
 func (s *SWND) RecvAckSegment(winSize uint16, ackNs ...uint32) {
 	s.init()
 	s.Lock()
-	ss := time.Now().UnixNano()
 	s.recvWinSize = int64(winSize)
 
 	defer func() {
 		s.Unlock()
 		s.trimAck()
 		s.send(true)
-		sss := time.Now().UnixNano() - ss
-		c := int64(time.Duration(2) * time.Millisecond)
-		if sss > c {
-			fmt.Println("time is", sss)
-		}
 	}()
 	log.Println("SWND : recv ack is", ackNs, ", recv win size is", s.recvWinSize)
 	// recv 0-3 => ack = 4

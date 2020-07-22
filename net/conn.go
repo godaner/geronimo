@@ -111,21 +111,23 @@ func (g *GConn) init() {
 				// recv udp
 				bs := make([]byte, udpmss, udpmss)
 				for {
-					n, err := g.UDPConn.Read(bs)
-					if err != nil {
-						panic(err)
-					}
-					m := &v1.Message{}
-					m.UnMarshall(bs[:n])
-					if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
-						g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
-						continue
-					}
-					if m.Flag()&rule.FlagACK == rule.FlagACK {
-						g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
-						continue
-					}
-					panic("no handler")
+					func(){
+						n, err := g.UDPConn.Read(bs)
+						if err != nil {
+							panic(err)
+						}
+						m := &v1.Message{}
+						m.UnMarshall(bs[:n])
+						if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
+							g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
+							return
+						}
+						if m.Flag()&rule.FlagACK == rule.FlagACK {
+							g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
+							return
+						}
+						panic("no handler")
+					}()
 				}
 			}()
 			return
