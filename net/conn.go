@@ -4,7 +4,6 @@ import (
 	"github.com/godaner/geronimo/rule"
 	v1 "github.com/godaner/geronimo/rule/v1"
 	v12 "github.com/godaner/geronimo/win/v1"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -55,31 +54,31 @@ func (g *GConn) init() {
 				b := m.Marshall()
 				if g.f == FDial {
 					_, err = g.UDPConn.Write(b)
-					log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String())
+					//log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String())
 					return err
 				}
 				if g.f == FListen {
 					_, err = g.UDPConn.WriteToUDP(b, g.raddr.toUDPAddr())
-					log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String())
+					//log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String())
 					return err
 				}
 				return nil
 			},
 		}
 		g.sendWin = &v12.SWND{
-			SegmentSender: func(firstSeq uint32, bs []byte) (err error) {
+			SegmentSender: func(seq uint32, bs []byte) (err error) {
 				// send udp
 				m := &v1.Message{}
-				m.PAYLOAD(firstSeq, bs)
+				m.PAYLOAD(seq, bs)
 				b := m.Marshall()
 				if g.f == FDial {
 					_, err = g.UDPConn.Write(b)
-					log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String())
+					//log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String())
 					return err
 				}
 				if g.f == FListen {
 					_, err = g.UDPConn.WriteToUDP(b, g.raddr.toUDPAddr())
-					log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String())
+					//log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String())
 					return err
 				}
 				return nil

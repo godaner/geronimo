@@ -3,7 +3,7 @@ package v1
 import (
 	"fmt"
 	"github.com/godaner/geronimo/rule"
-	"github.com/godaner/geronimo/win/datastruct"
+	"github.com/godaner/geronimo/win/ds"
 	"log"
 	"sync"
 	"time"
@@ -33,24 +33,23 @@ type RWND struct {
 	sync.Once
 	sync.RWMutex
 	AckSender   AckSender
-	recved      *datastruct.ByteBlockChan
-	recvWinSize int32  // recv window size
-	tailSeq     uint32 // current tail seq , location is tail
-	readyRecv   map[uint32]*rData
+	recved      *ds.ByteBlockChan
+	recvWinSize int32             // recv window size
+	readyRecv   map[uint32]*rData // cache recved package
+	tailSeq     uint32            // current tail seq , location is tail
 	ackWin      bool
 }
 
 // rData
 type rData struct {
-	b       byte
 	seq     uint32
-	needAck bool
 	isAlive bool
+	bs      []byte
 }
 
 // String
 func (r *rData) String() string {
-	return fmt.Sprintf("{%v:%v}", r.seq, string(r.b))
+	return fmt.Sprintf("{%v:%v}", r.seq, string(r.bs))
 }
 
 // ReadFull
@@ -87,40 +86,35 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 	r.init()
 	r.Lock()
 	defer r.Unlock()
-	log.Println("RWND : recv seq is [", seqN, ",", seqN+uint32(len(bs))-1, "]")
-	//s1 := time.Now().Unix()
+	log.Println("RWND : recv seq is [", seqN, "]")
 	if !r.inRecvSeqRange(seqN) {
 		ackN := seqN
 		r.incSeq(&ackN, uint16(len(bs)))
 		r.ack("4", &ackN)
 		return
 	}
-	for index, b := range bs {
-		rd, ok := r.readyRecv[seqN]
-		if !ok {
-			rd = &rData{}
-			r.readyRecv[seqN] = rd
-		}
-		if !ok || !rd.isAlive { // not repeat
-			r.incRecvWinSize(-1)
-		}
-		// fill daata
-		rd.b = b
-		rd.seq = seqN
-		rd.needAck = index == (len(bs) - 1)
-		rd.isAlive = true
-		r.incSeq(&seqN, 1)
+	rd, ok := r.readyRecv[seqN]
+	if !ok {
+		rd = &rData{}
+		r.readyRecv[seqN] = rd
 	}
+	if !ok || !rd.isAlive {
+		r.incRecvWinSize(-1)
+	}
+	rd.isAlive = true
+	rd.seq = seqN
+	rd.bs = bs
 	r.recv()
+	return
 }
 
 func (r *RWND) init() {
 	r.Do(func() {
 		r.recvWinSize = int32(rule.DefRecWinSize)
 		r.tailSeq = rule.MinSeqN
-		r.recved = &datastruct.ByteBlockChan{Size: 0}
+		r.recved = &ds.ByteBlockChan{Size: 0}
 		r.readyRecv = map[uint32]*rData{}
-		r.loopAckWin()
+		//r.loopAckWin()
 		r.loopPrint()
 	})
 }
@@ -129,8 +123,7 @@ func (r *RWND) init() {
 func (r *RWND) recv() {
 	firstCycle := true // eg. if no firstCycle , cache have seq 9 , 9 ack will be sent twice
 	for {
-		tailSeq := r.tailSeq
-		d := r.readyRecv[tailSeq]
+		d := r.readyRecv[r.tailSeq]
 		if d == nil || !d.isAlive {
 			if !firstCycle {
 				return
@@ -139,19 +132,16 @@ func (r *RWND) recv() {
 			return
 		}
 		firstCycle = false
-		// clear seq cache
+		// delete cache data
 		d.isAlive = false
 		// slide window , next seq
 		r.incSeq(&r.tailSeq, 1)
 		// put data to received
-		r.recved.BlockPush(d.b)
+		r.recved.BlockPushs(d.bs...)
 		// reset window size
 		r.incRecvWinSize(1)
 		// ack it
-		if d.needAck {
-			r.ack("2", nil)
-			return // segment end
-		}
+		r.ack("2", nil)
 	}
 }
 
@@ -162,7 +152,7 @@ func (r *RWND) ack(tag string, ackN *uint32) {
 		ackN = &a
 	}
 	rws := r.getRecvWinSize()
-	log.Println("RWND : tag is ", tag, ", send ack , ack is", *ackN, " , win size is", rws)
+	log.Println("RWND : tag is ", tag, ", send ack , ack is [", *ackN, "] , win size is", rws)
 	if rws <= 0 {
 		log.Println("RWND : tag is ", tag, ", set ackWin")
 		r.ackWin = true

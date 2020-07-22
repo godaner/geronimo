@@ -3,7 +3,7 @@ package net
 import (
 	"fmt"
 	"io"
-	"net/http"
+	"log"
 	_ "net/http/pprof"
 	"os"
 	"testing"
@@ -119,23 +119,12 @@ func s() {
 }
 
 func TestGConn_Read(t *testing.T) {
-
-	go func() {
-		http.ListenAndServe("0.0.0.0:8899", nil)
+	devNull, _ := os.Open(os.DevNull)
+	log.SetOutput(devNull)
+	go func(){
+		//<-time.After(600*time.Millisecond)
+		//panic("log")
 	}()
-	//devNull, _ := os.Open(os.DevNull)
-	//log.SetOutput(devNull)
-	//go func() {
-	//	//runtime.GOMAXPROCS(1)               // 限制 CPU 使用数，避免过载
-	//	runtime.SetMutexProfileFraction(1)  // 开启对锁调用的跟踪
-	//	runtime.SetBlockProfileRate(1)      // 开启对阻塞操作的跟踪
-	//	http.ListenAndServe("0.0.0.0:6060", nil)
-	//}()
-	//go func() {
-	//	if err := agent.Listen(agent.Options{Addr: "0.0.0.0:1688"}); err != nil {
-	//		log.Printf("err %s", err)
-	//	}
-	//}()
 	s := []byte{}
 	for i := 0; i < 100; i++ {
 		s = append(s, []byte("kecasdadad")...)
@@ -154,11 +143,8 @@ func TestGConn_Read(t *testing.T) {
 		}
 		for {
 			bs := make([]byte, len(s), len(s))
-			io.ReadFull(c2, bs)
-			fmt.Println(string(bs))
-			//time.Sleep(1000*time.Millisecond)
-			//n,_:=c2.Read(bs)
-			//fmt.Println(string(bs[0:n]))
+			n,err:=io.ReadFull(c2, bs)
+			fmt.Println(n,err,string(bs))
 		}
 	}()
 	time.Sleep(500 * time.Millisecond)
@@ -172,8 +158,6 @@ func TestGConn_Read(t *testing.T) {
 	go func() {
 		for {
 			c1.Write(s)
-			//return
-			//time.Sleep(1*time.Millisecond)
 		}
 	}()
 

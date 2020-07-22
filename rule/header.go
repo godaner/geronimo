@@ -16,19 +16,20 @@ const (
 	AttrPAYLOAD = iota // payload
 )
 const (
-	MaxSeqN = uint32(DefRecWinSize * 2)
+	MaxSeqN = uint32(2 * DefRecWinSize)
 	MinSeqN = uint32(0)
 )
 
 const (
-	DefCongWinSize = MSS * 1
-	DefRecWinSize  = MSS * 36
+	DefCongWinSize = 1
+	DefRecWinSize  = 64
+)
+
+const (
+	DefSsthresh = 16
 )
 const (
 	MSS = 1472 - 17 // 1455
-)
-const (
-	DefSsthresh = MSS * 16
 )
 
 type Header interface {

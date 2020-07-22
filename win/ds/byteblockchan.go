@@ -1,4 +1,4 @@
-package datastruct
+package ds
 
 import (
 	"github.com/godaner/geronimo/rule"
@@ -7,13 +7,13 @@ import (
 )
 
 const (
-	defSize = rule.DefRecWinSize*2
+	defSize = 2 * rule.DefRecWinSize * rule.MSS
 )
 
 type ByteBlockChan struct {
 	len  int64
 	c    chan byte
-	Size uint32
+	Size uint64
 	sync.Once
 }
 
@@ -58,5 +58,15 @@ func (b *ByteBlockChan) BlockPush(byt byte) (len uint32) {
 	b.init()
 	b.c <- byt
 	atomic.AddInt64(&b.len, 1)
+	return uint32(b.len)
+}
+
+// BlockPushs
+func (b *ByteBlockChan) BlockPushs(bs ...byte) (l uint32) {
+	b.init()
+	for _, by := range bs {
+		b.c <- by
+	}
+	atomic.AddInt64(&b.len, int64(len(bs)))
 	return uint32(b.len)
 }
