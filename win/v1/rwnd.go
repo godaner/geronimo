@@ -32,15 +32,12 @@ type AckSender func(ack uint32, receiveWinSize uint16) (err error)
 type RWND struct {
 	sync.Once
 	sync.RWMutex
-	// status
-	// outer
 	AckSender   AckSender
 	recved      *datastruct.ByteBlockChan
 	recvWinSize int32  // recv window size
 	tailSeq     uint32 // current tail seq , location is tail
-	// helper
-	readyRecv map[uint32]*rData
-	ackWin    bool
+	readyRecv   map[uint32]*rData
+	ackWin      bool
 }
 
 // rData

@@ -1,20 +1,142 @@
 package net
 
-import "net"
+import (
+	"errors"
+	"fmt"
+	"github.com/godaner/geronimo/rule"
+	v1 "github.com/godaner/geronimo/rule/v1"
+	"log"
+	"math/rand"
+	"net"
+	"sync"
+	"time"
+)
+
+func Listen(addr *GAddr) (l net.Listener, err error) {
+	c, err := net.ListenUDP("udp", addr.toUDPAddr())
+	if err != nil {
+		log.Println("Listen : ListenUDP err", err)
+		return nil, err
+	}
+	return &GListener{
+		laddr: addr,
+		c:     c,
+	}, nil
+}
 
 type GListener struct {
-
+	sync.RWMutex
+	sync.Once
+	laddr        *GAddr
+	c            *net.UDPConn
+	gcs          map[string]*GConn
+	acceptResult chan *acceptRes
+	estdResult   map[string]chan *estdRes
+}
+type estdRes struct {
+	err error
+	m   *v1.Message
+}
+type acceptRes struct {
+	c   net.Conn
+	err error
 }
 
-func (G *GListener) Accept() (net.Conn, error) {
-	panic("implement me")
+func (g *GListener) init() {
+	g.Do(func() {
+		g.acceptResult = make(chan *acceptRes)
+		g.estdResult = map[string]chan *estdRes{}
+		g.gcs = map[string]*GConn{}
+		go func() {
+			bs := make([]byte, udpmss, udpmss)
+			for {
+				func() {
+					g.Lock()
+					defer g.Unlock()
+					n, rAddr, err := g.c.ReadFromUDP(bs)
+					if err != nil {
+						log.Println("GListener : ReadFromUDP err", err)
+						return
+					}
+					//fmt.Println(rAddr)
+					m1 := &v1.Message{}
+					m1.UnMarshall(bs[:n])
+					gc := g.gcs[rAddr.String()]
+					if gc != nil && gc.Status() == StatusEstablished {
+						gc.dataFromListener(m1)
+						return
+					}
+					if m1.Flag()&rule.FlagSYN == rule.FlagSYN { // recv sync
+						// first connect
+						gc = &GConn{
+							UDPConn: g.c,
+							raddr:   fromUDPAddr(rAddr),
+							laddr:   fromUDPAddr(g.c.LocalAddr().(*net.UDPAddr)),
+							s:       StatusSynRecved,
+							f:       FListen,
+						}
+						g.gcs[rAddr.String()] = gc
+						// sync ack
+						seq := uint32(rand.Int31n(2<<16 - 2))
+						m2 := &v1.Message{}
+						m2.SYNACK(seq, m1.SeqN()+1, 0)
+						_, err = g.c.WriteToUDP(m2.Marshall(), rAddr)
+						if err != nil {
+							log.Println("GListener : Write err", err)
+							return
+						}
+						// wait established ack
+						res := make(chan *estdRes)
+						g.estdResult[rAddr.String()] = res
+						go func() (c *GConn, err error) {
+							defer func() {
+								g.acceptResult <- &acceptRes{
+									c:   c,
+									err: err,
+								}
+							}()
+							select {
+							case r := <-res: // recv established ack
+								if r.err != nil {
+									return nil, err
+								}
+								if seq+1 != r.m.AckN() {
+									return nil, errors.New("error ack number , seq is" + fmt.Sprint(seq) + ", ack is " + fmt.Sprint(r.m.AckN()))
+								}
+								gc.s = StatusEstablished
+								return gc, nil
+							case <-time.After(time.Duration(ackTimeout) * time.Millisecond): // wait ack timeout
+								return nil, errors.New("sync timeout")
+							}
+						}()
+						return
+					}
+					if gc != nil && gc.Status() == StatusSynRecved && m1.Flag()&rule.FlagACK == rule.FlagACK {
+						g.estdResult[rAddr.String()] <- &estdRes{
+							err: nil,
+							m:   m1,
+						}
+						return
+					}
+					panic("unknown err")
+				}()
+			}
+		}()
+	})
+}
+func (g *GListener) Accept() (c net.Conn, err error) {
+	g.init()
+	r := <-g.acceptResult
+	return r.c, r.err
 }
 
-func (G *GListener) Close() error {
-	panic("implement me")
+func (g *GListener) Close() error {
+	g.init()
+	//panic("implement me")
+	return nil // todo
 }
 
-func (G *GListener) Addr() net.Addr {
-	panic("implement me")
+func (g *GListener) Addr() net.Addr {
+	g.init()
+	return g.laddr
 }
-

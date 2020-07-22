@@ -4,6 +4,7 @@ import (
 	"github.com/godaner/geronimo/rule"
 	v1 "github.com/godaner/geronimo/rule/v1"
 	v12 "github.com/godaner/geronimo/win/v1"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -12,24 +13,57 @@ import (
 const (
 	udpmss      = 1472
 	syncTimeout = 2000
+	ackTimeout  = 2000
+)
+const (
+	_                 = iota
+	StatusSynSent     = iota
+	StatusSynRecved   = iota
+	StatusEstablished = iota
+	StatusFinWait1    = iota
+	StatusCloseWait   = iota
+	StatusFinWait2    = iota
+	StatusLastAck     = iota
+	StatusTimeWait    = iota
+)
+const (
+	_       = iota
+	FDial   = iota
+	FListen = iota
 )
 
+type Status uint16
 type GConn struct {
-	recvWin *v12.RWND
-	sendWin *v12.SWND
 	sync.Once
 	*net.UDPConn
+	f                uint8
+	s                Status
+	fromListenerData chan *v1.Message
+	recvWin          *v12.RWND
+	sendWin          *v12.SWND
+	raddr            *GAddr
+	laddr            *GAddr
 }
 
 func (g *GConn) init() {
 	g.Do(func() {
+		g.fromListenerData = make(chan *v1.Message)
 		g.recvWin = &v12.RWND{
 			AckSender: func(ack uint32, receiveWinSize uint16) (err error) {
 				m := &v1.Message{}
 				m.ACK(ack, receiveWinSize)
 				b := m.Marshall()
-				_, err = g.UDPConn.Write(b)
-				return err
+				if g.f == FDial {
+					_, err = g.UDPConn.Write(b)
+					log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String())
+					return err
+				}
+				if g.f == FListen {
+					_, err = g.UDPConn.WriteToUDP(b, g.raddr.toUDPAddr())
+					log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String())
+					return err
+				}
+				return nil
 			},
 		}
 		g.sendWin = &v12.SWND{
@@ -38,34 +72,71 @@ func (g *GConn) init() {
 				m := &v1.Message{}
 				m.PAYLOAD(firstSeq, bs)
 				b := m.Marshall()
-				_, err = g.UDPConn.Write(b)
-				return err
+				if g.f == FDial {
+					_, err = g.UDPConn.Write(b)
+					log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String())
+					return err
+				}
+				if g.f == FListen {
+					_, err = g.UDPConn.WriteToUDP(b, g.raddr.toUDPAddr())
+					log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String())
+					return err
+				}
+				return nil
 			},
 		}
-		go func() {
-			// recv udp
-			bs := make([]byte, udpmss, udpmss)
-			for {
-				_, err := g.UDPConn.Read(bs)
-				if err != nil {
-					panic(err)
-				}
-				m := &v1.Message{}
-				m.UnMarshall(bs)
-				if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
-					g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
-					continue
-				}
-				if m.Flag()&rule.FlagACK == rule.FlagACK {
-					g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
-					continue
-				}
-				panic("no handler")
-			}
+		if g.f == FListen {
+			go func() {
+				for {
+					select {
+					case m := <-g.fromListenerData:
+						if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
+							g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
+							continue
+						}
+						if m.Flag()&rule.FlagACK == rule.FlagACK {
+							g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
+							continue
+						}
+						panic("no handler")
+					}
 
-		}()
+				}
+
+			}()
+			return
+		}
+		if g.f == FDial {
+			go func() {
+				// recv udp
+				bs := make([]byte, udpmss, udpmss)
+				for {
+					n, err := g.UDPConn.Read(bs)
+					if err != nil {
+						panic(err)
+					}
+					m := &v1.Message{}
+					m.UnMarshall(bs[:n])
+					if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
+						g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
+						continue
+					}
+					if m.Flag()&rule.FlagACK == rule.FlagACK {
+						g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
+						continue
+					}
+					panic("no handler")
+				}
+			}()
+			return
+		}
 
 	})
+}
+
+func (g *GConn) dataFromListener(m *v1.Message) {
+	g.init()
+	g.fromListenerData <- m
 }
 func (g *GConn) Read(b []byte) (n int, err error) {
 	g.init()
@@ -79,26 +150,36 @@ func (g *GConn) Write(b []byte) (n int, err error) {
 }
 
 func (g *GConn) Close() error {
-	//panic("implement me")
-	return nil
+	g.init()
+	return nil // todo how to close ???
 }
 
 func (g *GConn) LocalAddr() net.Addr {
-	panic("implement me")
+	g.init()
+	return g.laddr
 }
 
 func (g *GConn) RemoteAddr() net.Addr {
-	panic("implement me")
+	g.init()
+	return g.raddr
 }
 
 func (g *GConn) SetDeadline(t time.Time) error {
+	g.init()
 	panic("implement me")
 }
 
 func (g *GConn) SetReadDeadline(t time.Time) error {
+	g.init()
 	panic("implement me")
 }
 
 func (g *GConn) SetWriteDeadline(t time.Time) error {
+	g.init()
 	panic("implement me")
+}
+
+func (g *GConn) Status() (s Status) {
+	g.init()
+	return g.s
 }

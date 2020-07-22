@@ -32,7 +32,7 @@ const (
 	def_rto = float64(1000) // ms
 	def_rtt = float64(500)  // ms
 	min_rto = float64(1)    // ms
-	max_rto = float64(3000) // ms
+	max_rto = float64(500)  // ms
 )
 
 type SegmentSender func(firstSeq uint32, bs []byte) (err error)
@@ -40,27 +40,24 @@ type SegmentSender func(firstSeq uint32, bs []byte) (err error)
 type SWND struct {
 	sync.Once
 	sync.RWMutex
-	// outer
-	SegmentSender SegmentSender
-	// status
-	sent        *datastruct.ByteBlockChan
-	sendWinSize int64  // send window size , from "congestion window size" or receive window size
-	congWinSize int64  // congestion window size
-	recvWinSize int64  // recv window size , from ack
-	headSeq     uint32 // current head seq , location is head
-	tailSeq     uint32 // current tail seq , location is tail
-	ssthresh    int64  // ssthresh
-	// helper
+	SegmentSender       SegmentSender
+	sent                *datastruct.ByteBlockChan
 	readySend           *datastruct.ByteBlockChan
 	segResendCancel     map[uint32]chan bool // for cancel resend
 	segResendQuick      map[uint32]chan bool // for quick resend
 	quickResendAckNum   map[uint32]*uint8    // for quick resend
 	cancelResendResult  map[uint32]chan bool // for ack progress
 	ackSeqCache         map[uint32]bool      // for slide head to right
+	clearReadySendTimer *time.Timer
+	sendWinSize         int64  // send window size , from "congestion window size" or receive window size
+	congWinSize         int64  // congestion window size
+	recvWinSize         int64  // recv window size , from ack
+	headSeq             uint32 // current head seq , location is head
+	tailSeq             uint32 // current tail seq , location is tail
+	ssthresh            int64  // ssthresh
 	rtts                float64
 	rttd                float64
 	rto                 float64
-	clearReadySendTimer *time.Timer
 }
 
 // Write
@@ -76,12 +73,18 @@ func (s *SWND) Write(bs []byte) {
 func (s *SWND) RecvAckSegment(winSize uint16, ackNs ...uint32) {
 	s.init()
 	s.Lock()
+	ss := time.Now().UnixNano()
 	s.recvWinSize = int64(winSize)
 
 	defer func() {
 		s.Unlock()
 		s.trimAck()
 		s.send(true)
+		sss := time.Now().UnixNano() - ss
+		c := int64(time.Duration(2) * time.Millisecond)
+		if sss > c {
+			fmt.Println("time is", sss)
+		}
 	}()
 	log.Println("SWND : recv ack is", ackNs, ", recv win size is", s.recvWinSize)
 	// recv 0-3 => ack = 4
@@ -196,7 +199,7 @@ func (s *SWND) setSegmentResend(firstSeq, lastSeq uint32, bs []byte) {
 			}
 			s.comSendWinSize()
 			s.comRTO(float64(rttme))
-			log.Println("SWND : rttm is", rttme, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", s.getRTO())
+			log.Println("SWND : rttm is", rttme, ", readySend len is", s.readySend.Len(), ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", s.getRTO())
 			t.Stop()
 			s.resetQuickResendAckNum(firstSeq)
 			delete(s.segResendCancel, lastSeq)

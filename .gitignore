@@ -1,6 +1,6 @@
 # Compiled Object files, Static and Dynamic libs (Shared Objects)
-src1
-dst1
+src*
+dst*
 *.o
 *.a
 *.so
