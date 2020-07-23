@@ -164,6 +164,7 @@ func TestGConn_Read(t *testing.T) {
 	}()
 	time.Sleep(500 * time.Millisecond)
 	c1, err := Dial(&GAddr{
+
 		IP:   "192.168.6.6",
 		Port: 2222,
 	})

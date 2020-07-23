@@ -25,7 +25,6 @@ func Listen(addr *GAddr) (l net.Listener, err error) {
 }
 
 type GListener struct {
-	sync.RWMutex
 	sync.Once
 	laddr        *GAddr
 	c            *net.UDPConn
@@ -51,8 +50,6 @@ func (g *GListener) init() {
 			bs := make([]byte, udpmss, udpmss)
 			for {
 				func() {
-					g.Lock()
-					defer g.Unlock()
 					n, rAddr, err := g.c.ReadFromUDP(bs)
 					if err != nil {
 						log.Println("GListener : ReadFromUDP err", err)
