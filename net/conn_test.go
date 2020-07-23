@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -128,8 +129,8 @@ func md5S(bs []byte)(s string){
 }
 func TestGConn_Read(t *testing.T) {
 	go http.ListenAndServe(":8888", nil)
-	//devNull, _ := os.Open(os.DevNull)
-	//log.SetOutput(devNull)
+	devNull, _ := os.Open(os.DevNull)
+	log.SetOutput(devNull)
 	go func(){
 		//<-time.After(600*time.Millisecond)
 		//panic("log")
@@ -151,14 +152,16 @@ func TestGConn_Read(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
+		i:=uint64(0)
 		for {
 			bs := make([]byte, len(s), len(s))
 			n,err:=io.ReadFull(c2, bs)
-			fmt.Println(n,err,string(bs))
+			fmt.Println(i,n,err,string(bs))
 			ssmd5:=md5S(bs)
 			if ssmd5!=smd5{
 				panic("not right md5")
 			}
+			i++
 		}
 	}()
 	time.Sleep(500 * time.Millisecond)

@@ -74,8 +74,8 @@ func (s *SWND) Write(bs []byte) {
 func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) {
 	s.init()
 	s.Lock()
-	//s.recvWinSize = int64(s.sendAbleNum(winSize, ack))
-	s.recvWinSize = int64(winSize) // todo
+	s.recvWinSize = int64(s.sendAbleNum(winSize, ack))
+	//s.recvWinSize = int64(winSize) // todo
 	s.comSendWinSize()
 	defer func() {
 		s.Unlock()
@@ -139,7 +139,8 @@ func (s *SWND) trimAck() {
 
 // sendAbleNum
 func (s *SWND) sendAbleNum(recvWinSize uint16, ack uint32) (num uint16) {
-	return uint16(uint32(recvWinSize) - s.seqSpace(s.tailSeq, ack, rule.MaxSeqN))
+	inNetPkgNum:=s.seqSpace(s.tailSeq, ack, rule.MaxSeqN)
+	return uint16(uint32(recvWinSize) - inNetPkgNum)
 }
 
 // seqSpace
@@ -164,7 +165,7 @@ func (s *SWND) send(checkMSS bool) {
 	s.Lock()
 	defer s.Unlock()
 	for {
-		if s.sendWinSize <= 0 { // no win size to send todo
+		if s.sendWinSize -s.sentC<= 0 { // no win size to send todo
 			return
 		}
 		if checkMSS && s.readySend.Len() < rule.MSS { // not enough to send
