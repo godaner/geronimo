@@ -77,7 +77,7 @@ func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) {
 	//s.recvWinSize = rule.DefRecWinSize // todo
 	//s.comSendWinSize()
 	//s.recvWinSize = int64(s.sendAbleNum(winSize, ack)) + s.sentC
-	//s.recvWinSize = int64(winSize)
+	//s.comSendWinSize()
 	defer func() {
 		s.Unlock()
 		s.trimAck()
@@ -109,7 +109,6 @@ func (s *SWND) init() {
 		s.rto = def_rto
 		s.rtts = def_rtt
 		s.rttd = def_rtt
-		//s.sent = &ds.ByteBlockChan{Size: 0}
 		s.readySend = &ds.ByteBlockChan{Size: 0}
 		s.segResendCancel = map[uint32]chan bool{}
 		s.segResendQuick = map[uint32]chan bool{}

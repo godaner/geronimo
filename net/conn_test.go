@@ -122,9 +122,7 @@ func s() {
 func md5S(bs []byte)(s string){
 	w := md5.New()
 	io.WriteString(w, string(bs))
-	//将str写入到w中
 	md5str2 := fmt.Sprintf("%x", w.Sum(nil))
-
 	return md5str2
 }
 func TestGConn_Read(t *testing.T) {
@@ -136,7 +134,7 @@ func TestGConn_Read(t *testing.T) {
 		//panic("log")
 	}()
 	s := []byte{}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		s = append(s, []byte("kecasdadad")...)
 	}
 	smd5:=md5S(s)
