@@ -13,8 +13,8 @@ import (
 )
 
 func TestDial(t *testing.T) {
-	//devNull, _ := os.Open(os.DevNull)
-	//log.SetOutput(devNull)
+	devNull, _ := os.Open(os.DevNull)
+	log.SetOutput(devNull)
 	go func() {
 		r()
 	}()
