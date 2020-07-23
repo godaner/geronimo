@@ -41,25 +41,26 @@ type SegmentSender func(seq uint32, bs []byte) (err error)
 type SWND struct {
 	sync.Once
 	sync.RWMutex
-	SegmentSender      SegmentSender
-	sentC              int64
-	ackSeqCache        map[uint32]bool      // for slide head to right
-	readySend          *ds.ByteBlockChan    // from app , cache data , wait for send
-	segResendCancel    map[uint32]chan bool // for cancel resend
-	segResendQuick     map[uint32]chan bool // for quick resend
-	quickResendAckNum  map[uint32]*uint8    // for quick resend
-	cancelResendResult map[uint32]chan bool // for ack progress
-	quickResendResult  map[uint32]chan bool // for ack progress
-	flushTimer         *time.Timer          // loopFlush not send data
-	sendWinSize        int64                // send window size , from "congestion window size" or receive window size
-	congWinSize        int64                // congestion window size
-	recvWinSize        int64                // not recv window size
-	headSeq            uint32               // current head seq , location is head
-	tailSeq            uint32               // current tail seq , location is tail
-	ssthresh           int64                // ssthresh
-	rtts               float64
-	rttd               float64
-	rto                float64
+	SegmentSender         SegmentSender
+	sentC                 int64
+	ackSeqCache           map[uint32]bool      // for slide head to right
+	readySend             *ds.ByteBlockChan    // from app , cache data , wait for send
+	segResendCancel       map[uint32]chan bool // for cancel resend
+	segResendQuick        map[uint32]chan bool // for quick resend
+	quickResendAckNum     map[uint32]*uint8    // for quick resend
+	quickResendAckNumLock sync.RWMutex         // for quickResendAckNum
+	cancelResendResult    map[uint32]chan bool // for ack progress
+	quickResendResult     map[uint32]chan bool // for ack progress
+	flushTimer            *time.Timer          // loopFlush not send data
+	sendWinSize           int64                // send window size , from "congestion window size" or receive window size
+	congWinSize           int64                // congestion window size
+	recvWinSize           int64                // not recv window size
+	headSeq               uint32               // current head seq , location is head
+	tailSeq               uint32               // current tail seq , location is tail
+	ssthresh              int64                // ssthresh
+	rtts                  float64
+	rttd                  float64
+	rto                   float64
 }
 
 // Write
@@ -73,7 +74,8 @@ func (s *SWND) Write(bs []byte) {
 func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) {
 	s.init()
 	s.Lock()
-	s.recvWinSize = int64(s.sendAbleNum(winSize, ack))
+	//s.recvWinSize = int64(s.sendAbleNum(winSize, ack))
+	s.recvWinSize = int64(winSize) // todo
 	s.comSendWinSize()
 	defer func() {
 		s.Unlock()
@@ -162,8 +164,7 @@ func (s *SWND) send(checkMSS bool) {
 	s.Lock()
 	defer s.Unlock()
 	for {
-		ws := s.sendWinSize - s.sentC // no win size to send
-		if ws <= 0 {
+		if s.sendWinSize <= 0 { // no win size to send todo
 			return
 		}
 		if checkMSS && s.readySend.Len() < rule.MSS { // not enough to send
@@ -258,8 +259,8 @@ func (s *SWND) readSegment(checkMSS bool) (bs []byte) {
 	if checkMSS && s.readySend.Len() < rule.MSS {
 		return
 	}
-	ws := int(s.sendWinSize - s.sentC)
-	for i := 0; i < rule.MSS && i < ws; i++ {
+	rN := s.sendWinSize * rule.MSS // todo
+	for i := 0; i < rule.MSS && i < int(rN); i++ {
 		usable, b, _ := s.readySend.Pop()
 		if !usable {
 			break
@@ -365,6 +366,8 @@ func (s *SWND) quickResendSegment(ack uint32) (match bool) {
 
 // resetQuickResendAckNum
 func (s *SWND) resetQuickResendAckNum(ack uint32) {
+	s.quickResendAckNumLock.Lock()
+	defer s.quickResendAckNumLock.Unlock()
 	num, ok := s.quickResendAckNum[ack]
 	if !ok {
 		return

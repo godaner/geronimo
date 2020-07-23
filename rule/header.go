@@ -22,11 +22,11 @@ const (
 
 const (
 	DefCongWinSize = 1
-	DefRecWinSize  = 64
+	DefRecWinSize  = 16
 )
 
 const (
-	DefSsthresh = 16
+	DefSsthresh = 8
 )
 const (
 	MSS = 1472 - 17 // 1455

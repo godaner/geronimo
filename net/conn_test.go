@@ -1,8 +1,10 @@
 package net
 
 import (
+	"crypto/md5"
 	"fmt"
 	"io"
+	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"testing"
@@ -116,8 +118,16 @@ func s() {
 
 	fmt.Println(end.Unix() - begin.Unix())
 }
+func md5S(bs []byte)(s string){
+	w := md5.New()
+	io.WriteString(w, string(bs))
+	//将str写入到w中
+	md5str2 := fmt.Sprintf("%x", w.Sum(nil))
 
+	return md5str2
+}
 func TestGConn_Read(t *testing.T) {
+	go http.ListenAndServe(":8888", nil)
 	//devNull, _ := os.Open(os.DevNull)
 	//log.SetOutput(devNull)
 	go func(){
@@ -128,6 +138,7 @@ func TestGConn_Read(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		s = append(s, []byte("kecasdadad")...)
 	}
+	smd5:=md5S(s)
 	go func() {
 		l, err := Listen(&GAddr{
 			IP:   "192.168.6.6",
@@ -144,6 +155,10 @@ func TestGConn_Read(t *testing.T) {
 			bs := make([]byte, len(s), len(s))
 			n,err:=io.ReadFull(c2, bs)
 			fmt.Println(n,err,string(bs))
+			ssmd5:=md5S(bs)
+			if ssmd5!=smd5{
+				panic("not right md5")
+			}
 		}
 	}()
 	time.Sleep(500 * time.Millisecond)
