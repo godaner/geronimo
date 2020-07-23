@@ -61,13 +61,21 @@ type SWND struct {
 	rtts                  float64
 	rttd                  float64
 	rto                   float64
+	closed                chan bool
+	closeFinish           chan bool
 }
 
 // Write
 func (s *SWND) Write(bs []byte) {
 	s.init()
-	s.readySend.BlockPushs(bs...)
-	s.send(true)
+	select {
+	case <-s.closed:
+		log.Println("SWND : window is closed")
+		return
+	default:
+		s.readySend.BlockPushs(bs...)
+		s.send(true)
+	}
 }
 
 // RecvAckSegment
@@ -117,6 +125,8 @@ func (s *SWND) init() {
 		s.quickResendAckNum = map[uint32]*uint8{}
 		s.ackSeqCache = map[uint32]bool{}
 		s.flushTimer = time.NewTimer(checkWinInterval)
+		s.closed = make(chan bool)
+		s.closeFinish = make(chan bool)
 		s.loopPrint()
 		s.loopFlush()
 	})
@@ -408,8 +418,14 @@ func (s *SWND) ack(ack uint32) (match bool) {
 func (s *SWND) loopPrint() {
 	go func() {
 		for {
-			log.Println("SWND : print , sent len is ", s.sentC, ", readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", recv win size is", s.recvWinSize, ", cong win size is", s.congWinSize, ", rto is", s.getRTO())
-			time.Sleep(1000 * time.Millisecond)
+			select {
+			case <-s.closed:
+				return
+			default:
+				log.Println("SWND : print , sent len is ", s.sentC, ", readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", recv win size is", s.recvWinSize, ", cong win size is", s.congWinSize, ", rto is", s.getRTO())
+				time.Sleep(1000 * time.Millisecond)
+			}
+
 		}
 	}()
 
@@ -418,11 +434,26 @@ func (s *SWND) loopPrint() {
 // loopFlush
 func (s *SWND) loopFlush() {
 	go func() {
+		defer s.flushTimer.Stop()
 		for {
 			select {
+			case <-s.closed:
+				<-time.After(10 * time.Millisecond)
+				s.send(false) // clear data
+				close(s.closeFinish) // todo ??
+				return
 			case <-s.flushTimer.C:
 				s.send(false)
 			}
 		}
 	}()
+}
+
+func (s *SWND) Close() (err error) {
+	close(s.closed)
+	return nil
+}
+
+func (s *SWND) CloseFinish() (sig chan bool) {
+	return s.closeFinish
 }

@@ -38,6 +38,7 @@ type RWND struct {
 	readyRecv   map[uint32]*rData // cache recved package
 	tailSeq     uint32            // current tail seq , location is tail
 	ackWin      bool
+	closed      chan bool
 }
 
 // rData
@@ -86,6 +87,13 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 	r.init()
 	r.Lock()
 	defer r.Unlock()
+	select {
+	case <-r.closed:
+		log.Println("RWND : window is closed")
+		return
+	default:
+
+	}
 	log.Println("RWND : recv seq is [", seqN, "]")
 	if !r.inRecvSeqRange(seqN) {
 		ackN := seqN
@@ -189,9 +197,15 @@ func (r *RWND) getRecvWinSize() (rws uint16) {
 func (r *RWND) loopPrint() {
 	go func() {
 		for {
-			log.Println("RWND : print , recved len is", r.recved.Len(), ", recv win size is", r.getRecvWinSize(), ", ackWin is", r.ackWin)
-			//log.Println("RWND : recv win size is", r.recvWinSize())
-			time.Sleep(1000 * time.Millisecond)
+			select {
+			case <-r.closed:
+				return
+			default:
+				log.Println("RWND : print , recved len is", r.recved.Len(), ", recv win size is", r.getRecvWinSize(), ", ackWin is", r.ackWin)
+				//log.Println("RWND : recv win size is", r.recvWinSize())
+				time.Sleep(1000 * time.Millisecond)
+			}
+
 		}
 	}()
 }
@@ -203,6 +217,8 @@ func (r *RWND) loopAckWin() {
 		defer t.Stop()
 		for {
 			select {
+			case <-r.closed:
+				return
 			case <-t.C:
 				rws := r.getRecvWinSize()
 				if r.ackWin && rws > 0 {
@@ -214,6 +230,7 @@ func (r *RWND) loopAckWin() {
 		}
 	}()
 }
+
 // inRecvSeqRange
 func (r *RWND) inRecvSeqRange(seq uint32) (yes bool) {
 	tailSeq := r.tailSeq
@@ -224,4 +241,9 @@ func (r *RWND) inRecvSeqRange(seq uint32) (yes bool) {
 		r.incSeq(&tailSeq, 1)
 	}
 	return false
+}
+
+func (r *RWND) Close() (err error) {
+	close(r.closed)
+	return nil
 }
