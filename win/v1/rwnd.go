@@ -163,17 +163,6 @@ func (r *RWND) ack(tag string, ackN *uint32) {
 	}
 }
 
-// inRecvSeqRange
-func (r *RWND) inRecvSeqRange(seq uint32) (yes bool) {
-	tailSeq := r.tailSeq
-	for i := 0; i < int(r.getRecvWinSize()); i++ {
-		if tailSeq == seq {
-			return true
-		}
-	}
-	return false
-}
-
 // incSeq
 func (r *RWND) incSeq(seq *uint32, step uint16) {
 	*seq = (*seq+uint32(step))%rule.MaxSeqN + rule.MinSeqN
@@ -224,4 +213,15 @@ func (r *RWND) loopAckWin() {
 			}
 		}
 	}()
+}
+// inRecvSeqRange
+func (r *RWND) inRecvSeqRange(seq uint32) (yes bool) {
+	tailSeq := r.tailSeq
+	for i := 0; i < rule.DefRecWinSize; i++ {
+		if seq == tailSeq {
+			return true
+		}
+		r.incSeq(&tailSeq, 1)
+	}
+	return false
 }

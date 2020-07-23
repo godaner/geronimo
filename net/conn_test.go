@@ -3,7 +3,6 @@ package net
 import (
 	"fmt"
 	"io"
-	"log"
 	_ "net/http/pprof"
 	"os"
 	"testing"
@@ -119,8 +118,8 @@ func s() {
 }
 
 func TestGConn_Read(t *testing.T) {
-	devNull, _ := os.Open(os.DevNull)
-	log.SetOutput(devNull)
+	//devNull, _ := os.Open(os.DevNull)
+	//log.SetOutput(devNull)
 	go func(){
 		//<-time.After(600*time.Millisecond)
 		//panic("log")
