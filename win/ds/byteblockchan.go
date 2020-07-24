@@ -1,13 +1,14 @@
 package ds
 
 import (
-	"github.com/godaner/geronimo/rule"
+	"errors"
 	"sync"
 	"sync/atomic"
 )
 
 const (
-	defSize = 2 * rule.DefRecWinSize * rule.MSS
+	//defSize = 2 * rule.DefRecWinSize * rule.MSS
+	defSize = 1<<32 - 1
 )
 
 type ByteBlockChan struct {
@@ -51,6 +52,18 @@ func (b *ByteBlockChan) BlockPop() (byt byte, len uint32) {
 	byt = <-b.c
 	atomic.AddInt64(&b.len, -1)
 	return byt, uint32(b.len)
+}
+
+// BlockPopWithStop
+func (b *ByteBlockChan) BlockPopWithStop(stop chan bool) (byt byte, len uint32, err error) {
+	b.init()
+	select {
+	case <-stop:
+		return 0, 0, errors.New("stop err")
+	case byt = <-b.c:
+		atomic.AddInt64(&b.len, -1)
+		return byt, uint32(b.len), nil
+	}
 }
 
 // BlockPush

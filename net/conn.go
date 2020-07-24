@@ -4,6 +4,8 @@ import (
 	"github.com/godaner/geronimo/rule"
 	v1 "github.com/godaner/geronimo/rule/v1"
 	v12 "github.com/godaner/geronimo/win/v1"
+	"log"
+	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -24,45 +26,38 @@ const (
 	StatusFinWait2    = iota
 	StatusLastAck     = iota
 	StatusTimeWait    = iota
+	StatusClosed      = iota
 )
 const (
 	_       = iota
 	FDial   = iota
 	FListen = iota
 )
+const msl = 60 * 2
 
 type Status uint16
 type GConn struct {
 	sync.Once
 	*net.UDPConn
-	f                uint8
-	s                Status
-	fromListenerData chan *v1.Message
-	recvWin          *v12.RWND
-	sendWin          *v12.SWND
-	raddr            *GAddr
-	laddr            *GAddr
+	f                            uint8
+	s                            Status
+	recvWin                      *v12.RWND
+	sendWin                      *v12.SWND
+	raddr                        *GAddr
+	laddr                        *GAddr
+	lis                          *GListener
+	fin1SeqU, fin1SeqV, fin2SeqW uint32
+	closeFinish                  chan bool
 }
 
 func (g *GConn) init() {
 	g.Do(func() {
-		g.fromListenerData = make(chan *v1.Message)
+		g.closeFinish = make(chan bool)
 		g.recvWin = &v12.RWND{
 			AckSender: func(ack uint32, receiveWinSize uint16) (err error) {
 				m := &v1.Message{}
 				m.ACK(ack, receiveWinSize)
-				b := m.Marshall()
-				if g.f == FDial {
-					_, err = g.UDPConn.Write(b)
-					//log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String())
-					return err
-				}
-				if g.f == FListen {
-					_, err = g.UDPConn.WriteToUDP(b, g.raddr.toUDPAddr())
-					//log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String())
-					return err
-				}
-				return nil
+				return g.sendMessage(m)
 			},
 		}
 		g.sendWin = &v12.SWND{
@@ -70,62 +65,22 @@ func (g *GConn) init() {
 				// send udp
 				m := &v1.Message{}
 				m.PAYLOAD(seq, bs)
-				b := m.Marshall()
-				if g.f == FDial {
-					_, err = g.UDPConn.Write(b)
-					//log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String())
-					return err
-				}
-				if g.f == FListen {
-					_, err = g.UDPConn.WriteToUDP(b, g.raddr.toUDPAddr())
-					//log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String())
-					return err
-				}
-				return nil
+				return g.sendMessage(m)
 			},
-		}
-		if g.f == FListen {
-			go func() {
-				for {
-					select {
-					case m := <-g.fromListenerData:
-						if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
-							g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
-							continue
-						}
-						if m.Flag()&rule.FlagACK == rule.FlagACK {
-							g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
-							continue
-						}
-						panic("no handler")
-					}
-
-				}
-
-			}()
-			return
 		}
 		if g.f == FDial {
 			go func() {
 				// recv udp
 				bs := make([]byte, udpmss, udpmss)
 				for {
-					func(){
+					func() {
 						n, err := g.UDPConn.Read(bs)
 						if err != nil {
 							panic(err)
 						}
 						m := &v1.Message{}
 						m.UnMarshall(bs[:n])
-						if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
-							g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
-							return
-						}
-						if m.Flag()&rule.FlagACK == rule.FlagACK {
-							g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
-							return
-						}
-						panic("no handler")
+						g.handleMessage(m)
 					}()
 				}
 			}()
@@ -135,10 +90,104 @@ func (g *GConn) init() {
 	})
 }
 
-func (g *GConn) dataFromListener(m *v1.Message) {
-	g.init()
-	g.fromListenerData <- m
+// handleMessage
+func (g *GConn) handleMessage(m *v1.Message) {
+	if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
+		g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
+		return
+	}
+	if g.s == StatusEstablished && m.Flag()&rule.FlagFIN == rule.FlagFIN {
+		g.fin1SeqU = m.SeqN()
+		g.fin1SeqV = uint32(rand.Int31n(2<<16 - 2))
+		m.ACKN(g.fin1SeqV, g.fin1SeqU+1, 0)
+		err := g.sendMessage(m)
+		if err != nil {
+			log.Println("GConn : handleMessage ACKN StatusCloseWait err", err)
+		}
+		g.s = StatusCloseWait
+		go func() {
+			g.sendWin.Close()
+			g.fin2SeqW = uint32(rand.Int31n(2<<16 - 2))
+			m.FINACK(g.fin2SeqW, g.fin1SeqU+1, 0)
+			err := g.sendMessage(m)
+			if err != nil {
+				log.Println("GConn : handleMessage ACKN StatusLastAck err", err)
+			}
+			g.s = StatusLastAck
+		}()
+		return
+	}
+	if g.s == StatusFinWait1 && m.Flag()&rule.FlagACK == rule.FlagACK {
+		g.fin1SeqV = m.SeqN()
+		if m.AckN()-1 != g.fin1SeqU {
+			log.Println("GConn : handleMessage fin1SeqU StatusFinWait2 err", m.AckN()-1, g.fin1SeqU)
+			return
+		}
+		g.s = StatusFinWait2
+		return
+	}
+	if g.s == StatusFinWait2 && m.Flag()&rule.FlagACK == rule.FlagACK && m.Flag()&rule.FlagFIN == rule.FlagFIN {
+		g.fin2SeqW = m.SeqN()
+		if m.AckN()-1 != g.fin1SeqU {
+			log.Println("GConn : handleMessage fin1SeqU StatusTimeWait err", m.AckN()-1, g.fin1SeqU)
+			return
+		}
+		m.ACKN(g.fin1SeqU+1, g.fin2SeqW+1, 0)
+		err := g.sendMessage(m)
+		if err != nil {
+			log.Println("GConn : handleMessage ACKN StatusTimeWait err", err)
+		}
+		g.s = StatusTimeWait
+		go func() {
+			g.closeFinish <- true
+			<-time.After(time.Duration(2*msl) * time.Second)
+			g.recvWin.Close()
+			g.rmFromLis()
+			g.s = StatusClosed
+		}()
+		return
+	}
+	if g.s == StatusLastAck && m.Flag()&rule.FlagACK == rule.FlagACK {
+		if m.AckN()-1 != g.fin2SeqW {
+			log.Println("GConn : handleMessage fin2SeqW StatusLastAck err", m.AckN()-1, g.fin2SeqW)
+			return
+		}
+		if m.SeqN()-1 != g.fin1SeqU {
+			log.Println("GConn : handleMessage fin1SeqU StatusLastAck err", m.SeqN()-1, g.fin1SeqU)
+			return
+		}
+		g.rmFromLis()
+		g.recvWin.Close()
+		g.s = StatusClosed
+		return
+	}
+	if m.Flag()&rule.FlagACK == rule.FlagACK {
+		g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
+		return
+	}
+	panic("no handler")
 }
+func (g *GConn) rmFromLis() {
+	if g.lis == nil {
+		return
+	}
+	g.lis.gcs.Delete(g.raddr.toUDPAddr().String())
+}
+func (g *GConn) sendMessage(m *v1.Message) (err error) {
+	b := m.Marshall()
+	if g.f == FDial {
+		_, err = g.UDPConn.Write(b)
+		//log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String())
+		return err
+	}
+	if g.f == FListen {
+		_, err = g.UDPConn.WriteToUDP(b, g.raddr.toUDPAddr())
+		//log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String())
+		return err
+	}
+	return nil
+}
+
 func (g *GConn) Read(b []byte) (n int, err error) {
 	g.init()
 	return g.recvWin.Read(b)
@@ -146,13 +195,12 @@ func (g *GConn) Read(b []byte) (n int, err error) {
 
 func (g *GConn) Write(b []byte) (n int, err error) {
 	g.init()
-	g.sendWin.Write(b)
-	return len(b), nil
+	return len(b), g.sendWin.Write(b)
 }
 
 func (g *GConn) Close() error {
 	g.init()
-	return nil // todo how to close ???
+	return g.close()
 }
 
 func (g *GConn) LocalAddr() net.Addr {
@@ -183,4 +231,18 @@ func (g *GConn) SetWriteDeadline(t time.Time) error {
 func (g *GConn) Status() (s Status) {
 	g.init()
 	return g.s
+}
+
+func (g *GConn) close() (err error) {
+	g.sendWin.Close()
+	m := &v1.Message{}
+	g.fin1SeqU = uint32(rand.Int31n(2<<16 - 2))
+	m.FIN(g.fin1SeqU)
+	err = g.sendMessage(m)
+	if err != nil {
+		return err
+	}
+	g.s = StatusFinWait1
+	<-g.closeFinish
+	return nil
 }

@@ -185,11 +185,17 @@ func (m *Message) SYN(seqN uint32) {
 func (m *Message) SYNACK(seqN, ackN uint32, winSize uint16) {
 	m.newMessage(rule.FlagSYN|rule.FlagACK, seqN, ackN, winSize)
 }
-func (m *Message) ACK(seqN uint32, winSize uint16) {
-	m.newMessage(rule.FlagACK, 0, seqN, winSize)
+func (m *Message) ACK(ackN uint32, winSize uint16) {
+	m.newMessage(rule.FlagACK, 0, ackN, winSize)
+}
+func (m *Message) ACKN(seqN, ackN uint32, winSize uint16) {
+	m.newMessage(rule.FlagACK, seqN, ackN, winSize)
 }
 func (m *Message) FINACK(seqN, ackN uint32, winSize uint16) {
 	m.newMessage(rule.FlagFIN|rule.FlagACK, seqN, ackN, winSize)
+}
+func (m *Message) FIN(seqN uint32) {
+	m.newMessage(rule.FlagFIN, seqN, 0, 0)
 }
 func (m *Message) PAYLOAD(seqN uint32, payload []byte) {
 	m.newMessage(rule.FlagPAYLOAD, seqN, 0, 0)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/godaner/geronimo/rule"
 	"github.com/godaner/geronimo/win/ds"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -31,13 +32,13 @@ type AckSender func(ack uint32, receiveWinSize uint16) (err error)
 //  Receive window
 type RWND struct {
 	sync.Once
-	sync.RWMutex
 	AckSender   AckSender
 	recved      *ds.ByteBlockChan
-	recvWinSize int32             // recv window size
-	readyRecv   map[uint32]*rData // cache recved package
-	tailSeq     uint32            // current tail seq , location is tail
+	recvWinSize int32     // recv window size
+	readyRecv   *sync.Map //map[uint32]*rData // cache recved package
+	tailSeq     uint32    // current tail seq , location is tail
 	ackWin      bool
+	closeSignal chan bool
 }
 
 // rData
@@ -64,10 +65,19 @@ func (r *rData) String() string {
 // Read
 func (r *RWND) Read(bs []byte) (n int, err error) {
 	r.init()
+	select {
+	case <-r.closeSignal:
+		return 0, io.EOF
+	default:
+
+	}
 	if len(bs) <= 0 {
 		return 0, nil
 	}
-	bs[0], _ = r.recved.BlockPop()
+	bs[0], _, err = r.recved.BlockPopWithStop(r.closeSignal)
+	if err != nil {
+		return 0, io.EOF
+	}
 	n = 1
 	for i := 1; i < len(bs); i++ {
 		usable, b, _ := r.recved.Pop()
@@ -84,8 +94,13 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 // RecvSegment
 func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 	r.init()
-	r.Lock()
-	defer r.Unlock()
+	select {
+	case <-r.closeSignal:
+		log.Println("RWND : window is closeSignal")
+		return
+	default:
+
+	}
 	log.Println("RWND : recv seq is [", seqN, "]")
 	if !r.inRecvSeqRange(seqN) {
 		ackN := seqN
@@ -93,10 +108,11 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 		r.ack("4", &ackN)
 		return
 	}
-	rd, ok := r.readyRecv[seqN]
+	rdI, ok := r.readyRecv.Load(seqN)
+	rd, _ := rdI.(*rData)
 	if !ok {
 		rd = &rData{}
-		r.readyRecv[seqN] = rd
+		r.readyRecv.Store(seqN, rd)
 	}
 	if !ok || !rd.isAlive {
 		r.incRecvWinSize(-1)
@@ -104,7 +120,9 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 	rd.isAlive = true
 	rd.seq = seqN
 	rd.bs = bs
+	//s := time.Now().Nanosecond()
 	r.recv()
+	//fmt.Println("recv time is", time.Now().Nanosecond()-s)
 	return
 }
 
@@ -113,7 +131,8 @@ func (r *RWND) init() {
 		r.recvWinSize = int32(rule.DefRecWinSize)
 		r.tailSeq = rule.MinSeqN
 		r.recved = &ds.ByteBlockChan{Size: 0}
-		r.readyRecv = map[uint32]*rData{}
+		r.readyRecv = &sync.Map{}
+		r.closeSignal = make(chan bool)
 		//r.loopAckWin()
 		r.loopPrint()
 	})
@@ -123,8 +142,9 @@ func (r *RWND) init() {
 func (r *RWND) recv() {
 	firstCycle := true // eg. if no firstCycle , cache have seq 9 , 9 ack will be sent twice
 	for {
-		d := r.readyRecv[r.tailSeq]
-		if d == nil || !d.isAlive {
+		di, ok := r.readyRecv.Load(r.tailSeq)
+		d, _ := di.(*rData)
+		if !ok || d == nil || !d.isAlive {
 			if !firstCycle {
 				return
 			}
@@ -189,9 +209,15 @@ func (r *RWND) getRecvWinSize() (rws uint16) {
 func (r *RWND) loopPrint() {
 	go func() {
 		for {
-			log.Println("RWND : print , recved len is", r.recved.Len(), ", recv win size is", r.getRecvWinSize(), ", ackWin is", r.ackWin)
-			//log.Println("RWND : recv win size is", r.recvWinSize())
-			time.Sleep(1000 * time.Millisecond)
+			select {
+			case <-r.closeSignal:
+				return
+			default:
+				log.Println("RWND : print , recved len is", r.recved.Len(), ", recv win size is", r.getRecvWinSize(), ", ackWin is", r.ackWin)
+				//log.Println("RWND : recv win size is", r.recvWinSize())
+				time.Sleep(1000 * time.Millisecond)
+			}
+
 		}
 	}()
 }
@@ -203,6 +229,8 @@ func (r *RWND) loopAckWin() {
 		defer t.Stop()
 		for {
 			select {
+			case <-r.closeSignal:
+				return
 			case <-t.C:
 				rws := r.getRecvWinSize()
 				if r.ackWin && rws > 0 {
@@ -214,6 +242,7 @@ func (r *RWND) loopAckWin() {
 		}
 	}()
 }
+
 // inRecvSeqRange
 func (r *RWND) inRecvSeqRange(seq uint32) (yes bool) {
 	tailSeq := r.tailSeq
@@ -224,4 +253,10 @@ func (r *RWND) inRecvSeqRange(seq uint32) (yes bool) {
 		r.incSeq(&tailSeq, 1)
 	}
 	return false
+}
+
+func (r *RWND) Close() (err error) {
+	r.init()
+	close(r.closeSignal)
+	return nil
 }

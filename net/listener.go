@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -25,11 +26,10 @@ func Listen(addr *GAddr) (l net.Listener, err error) {
 }
 
 type GListener struct {
-	sync.RWMutex
 	sync.Once
 	laddr        *GAddr
 	c            *net.UDPConn
-	gcs          map[string]*GConn
+	gcs          *sync.Map //map[string]*GConn
 	acceptResult chan *acceptRes
 	estdResult   map[string]chan *estdRes
 }
@@ -46,13 +46,11 @@ func (g *GListener) init() {
 	g.Do(func() {
 		g.acceptResult = make(chan *acceptRes)
 		g.estdResult = map[string]chan *estdRes{}
-		g.gcs = map[string]*GConn{}
+		g.gcs = &sync.Map{} //map[string]*GConn{}
 		go func() {
 			bs := make([]byte, udpmss, udpmss)
 			for {
 				func() {
-					g.Lock()
-					defer g.Unlock()
 					n, rAddr, err := g.c.ReadFromUDP(bs)
 					if err != nil {
 						log.Println("GListener : ReadFromUDP err", err)
@@ -61,21 +59,38 @@ func (g *GListener) init() {
 					//fmt.Println(rAddr)
 					m1 := &v1.Message{}
 					m1.UnMarshall(bs[:n])
-					gc := g.gcs[rAddr.String()]
-					if gc != nil && gc.Status() == StatusEstablished {
-						gc.dataFromListener(m1)
-						return
+					gcI, _ := g.gcs.Load(rAddr.String())
+					gc, _ := gcI.(*GConn)
+					if gc != nil {
+						if gc.Status() >= StatusEstablished {
+							gc.handleMessage(m1)
+							return
+						}
+						if gc.Status() == StatusSynRecved && m1.Flag()&rule.FlagACK == rule.FlagACK {
+							g.estdResult[rAddr.String()] <- &estdRes{
+								err: nil,
+								m:   m1,
+							}
+							return
+						}
 					}
 					if m1.Flag()&rule.FlagSYN == rule.FlagSYN { // recv sync
-						// first connect
-						gc = &GConn{
-							UDPConn: g.c,
-							raddr:   fromUDPAddr(rAddr),
-							laddr:   fromUDPAddr(g.c.LocalAddr().(*net.UDPAddr)),
-							s:       StatusSynRecved,
-							f:       FListen,
+						if gc != nil && gc.Status() != StatusSynRecved {
+							log.Println("GListener : syn err , gc is exits")
+							return
 						}
-						g.gcs[rAddr.String()] = gc
+						if gc == nil {
+							// first connect
+							gc = &GConn{
+								UDPConn: g.c,
+								raddr:   fromUDPAddr(rAddr),
+								laddr:   fromUDPAddr(g.c.LocalAddr().(*net.UDPAddr)),
+								s:       StatusSynRecved,
+								f:       FListen,
+								lis:     g,
+							}
+						}
+						g.gcs.Store(rAddr.String(), gc)
 						// sync ack
 						seq := uint32(rand.Int31n(2<<16 - 2))
 						m2 := &v1.Message{}
@@ -111,13 +126,7 @@ func (g *GListener) init() {
 						}()
 						return
 					}
-					if gc != nil && gc.Status() == StatusSynRecved && m1.Flag()&rule.FlagACK == rule.FlagACK {
-						g.estdResult[rAddr.String()] <- &estdRes{
-							err: nil,
-							m:   m1,
-						}
-						return
-					}
+					fmt.Println(strconv.FormatUint(uint64(m1.Flag()),2))
 					panic("unknown err")
 				}()
 			}
