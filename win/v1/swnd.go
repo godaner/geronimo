@@ -133,7 +133,9 @@ func (s *SWND) init() {
 	})
 }
 func (s *SWND) trimAck() {
+	s.Lock()
 	defer func() {
+		s.Unlock()
 		log.Println("SWND : trimAck , sent len is", s.sentC)
 	}()
 	for {

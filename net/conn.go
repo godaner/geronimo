@@ -14,12 +14,13 @@ import (
 )
 
 const (
-	udpmss      = 1472
-	syncTimeout = 2000
-	ackTimeout  = 2000
+	udpmss            = 1472
+	syncTimeout       = 2000
+	lastSynAckTimeout = 1000
 )
 const (
 	_                 = iota
+	StatusListen      = iota
 	StatusSynSent     = iota
 	StatusSynRecved   = iota
 	StatusEstablished = iota
@@ -41,19 +42,21 @@ type Status uint16
 type GConn struct {
 	sync.Once
 	*net.UDPConn
-	f                            uint8
-	s                            Status
-	recvWin                      *v12.RWND
-	sendWin                      *v12.SWND
-	raddr                        *GAddr
-	laddr                        *GAddr
-	lis                          *GListener
-	fin1SeqU, fin1SeqV, fin2SeqW uint32
-	closeFinish                  chan bool
+	f                                              uint8
+	s                                              Status
+	recvWin                                        *v12.RWND
+	sendWin                                        *v12.SWND
+	raddr                                          *GAddr
+	laddr                                          *GAddr
+	lis                                            *GListener
+	synSeqX, synSeqY, fin1SeqU, fin1SeqV, fin2SeqW uint32
+	dialFinish                                     chan error
+	closeFinish                                    chan bool
 }
 
 func (g *GConn) init() {
 	g.Do(func() {
+		g.dialFinish = make(chan error)
 		g.closeFinish = make(chan bool)
 		g.recvWin = &v12.RWND{
 			AckSender: func(ack uint32, receiveWinSize uint16) (err error) {
@@ -94,88 +97,50 @@ func (g *GConn) init() {
 
 // handleMessage
 func (g *GConn) handleMessage(m *v1.Message) {
+	g.init()
 	if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
-		g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
+		g.payloadMessageHandler(m)
 		return
 	}
+	// connect
+	if g.s == StatusListen && m.Flag()&rule.FlagSYN == rule.FlagSYN {
+		g.connectSynMessageHandler(m)
+		return
+	}
+	if g.s == StatusSynSent && m.Flag()&rule.FlagACK == rule.FlagACK && m.Flag()&rule.FlagSYN == rule.FlagSYN {
+		g.connectSynAckMessageHandler(m)
+		return
+	}
+	if g.s == StatusSynRecved && m.Flag()&rule.FlagACK == rule.FlagACK {
+		g.connectAckMessageHandler(m)
+		return
+	}
+	// fin
 	if g.s == StatusEstablished && m.Flag()&rule.FlagFIN == rule.FlagFIN {
-		g.fin1SeqU = m.SeqN()
-		g.fin1SeqV = uint32(rand.Int31n(2<<16 - 2))
-		m.ACKN(g.fin1SeqV, g.fin1SeqU+1, 0)
-		err := g.sendMessage(m)
-		if err != nil {
-			log.Println("GConn : handleMessage ACKN StatusCloseWait err", err)
-		}
-		g.s = StatusCloseWait
-		go func() {
-			g.sendWin.Close()
-			g.fin2SeqW = uint32(rand.Int31n(2<<16 - 2))
-			m.FINACK(g.fin2SeqW, g.fin1SeqU+1, 0)
-			err := g.sendMessage(m)
-			if err != nil {
-				log.Println("GConn : handleMessage ACKN StatusLastAck err", err)
-			}
-			g.s = StatusLastAck
-		}()
+		g.finMessageHandler(m)
 		return
 	}
 	if g.s == StatusFinWait1 && m.Flag()&rule.FlagACK == rule.FlagACK {
-		g.fin1SeqV = m.SeqN()
-		if m.AckN()-1 != g.fin1SeqU {
-			log.Println("GConn : handleMessage fin1SeqU StatusFinWait2 err", m.AckN()-1, g.fin1SeqU)
-			return
-		}
-		g.s = StatusFinWait2
+		g.fin1AckMessageHandler(m)
 		return
 	}
 	if g.s == StatusFinWait2 && m.Flag()&rule.FlagACK == rule.FlagACK && m.Flag()&rule.FlagFIN == rule.FlagFIN {
-		g.fin2SeqW = m.SeqN()
-		if m.AckN()-1 != g.fin1SeqU {
-			log.Println("GConn : handleMessage fin1SeqU StatusTimeWait err", m.AckN()-1, g.fin1SeqU)
-			return
-		}
-		m.ACKN(g.fin1SeqU+1, g.fin2SeqW+1, 0)
-		err := g.sendMessage(m)
-		if err != nil {
-			log.Println("GConn : handleMessage ACKN StatusTimeWait err", err)
-		}
-		g.s = StatusTimeWait
-		go func() {
-			g.closeFinish <- true
-			<-time.After(time.Duration(2*msl) * time.Second)
-			g.recvWin.Close()
-			g.rmFromLis()
-			g.s = StatusClosed
-		}()
+		g.fin2AckMessageHandler(m)
 		return
 	}
 	if g.s == StatusLastAck && m.Flag()&rule.FlagACK == rule.FlagACK {
-		if m.AckN()-1 != g.fin2SeqW {
-			log.Println("GConn : handleMessage fin2SeqW StatusLastAck err", m.AckN()-1, g.fin2SeqW)
-			return
-		}
-		if m.SeqN()-1 != g.fin1SeqU {
-			log.Println("GConn : handleMessage fin1SeqU StatusLastAck err", m.SeqN()-1, g.fin1SeqU)
-			return
-		}
-		g.rmFromLis()
-		g.recvWin.Close()
-		g.s = StatusClosed
+		g.finLastAckMessageHandler(m)
 		return
 	}
-	if m.Flag()&rule.FlagACK == rule.FlagACK {
-		g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
+	if g.s >= StatusEstablished && m.Flag()&rule.FlagACK == rule.FlagACK {
+		g.ackMessageHandler(m)
 		return
 	}
-	log.Println("gc",g.s,"flag",strconv.FormatUint(uint64(m.Flag()),2))
+	log.Println("conn status is", g.s, ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
 	panic("no handler")
 }
-func (g *GConn) rmFromLis() {
-	if g.lis == nil {
-		return
-	}
-	g.lis.gcs.Delete(g.raddr.toUDPAddr().String())
-}
+
+// sendMessage
 func (g *GConn) sendMessage(m *v1.Message) (err error) {
 	b := m.Marshall()
 	if g.f == FDial {
@@ -191,6 +156,13 @@ func (g *GConn) sendMessage(m *v1.Message) (err error) {
 	return nil
 }
 
+// rmFromLis
+func (g *GConn) rmFromLis() {
+	if g.lis == nil {
+		return
+	}
+	g.lis.gcs.Delete(g.raddr.toUDPAddr().String())
+}
 func (g *GConn) Read(b []byte) (n int, err error) {
 	g.init()
 	return g.recvWin.Read(b)
