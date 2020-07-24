@@ -1,6 +1,7 @@
 package net
 
 import (
+	"errors"
 	"github.com/godaner/geronimo/rule"
 	v1 "github.com/godaner/geronimo/rule/v1"
 	v12 "github.com/godaner/geronimo/win/v1"
@@ -234,6 +235,9 @@ func (g *GConn) Status() (s Status) {
 }
 
 func (g *GConn) close() (err error) {
+	if g.s != StatusEstablished {
+		return errors.New("status is not right")
+	}
 	g.sendWin.Close()
 	m := &v1.Message{}
 	g.fin1SeqU = uint32(rand.Int31n(2<<16 - 2))
