@@ -127,8 +127,8 @@ func md5S(bs []byte)(s string){
 }
 func TestGConn_Read(t *testing.T) {
 	go http.ListenAndServe(":8888", nil)
-	//devNull, _ := os.Open(os.DevNull)
-	//log.SetOutput(devNull)
+	devNull, _ := os.Open(os.DevNull)
+	log.SetOutput(devNull)
 	go func(){
 		//<-time.After(600*time.Millisecond)
 		//panic("log")

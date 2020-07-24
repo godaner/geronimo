@@ -39,22 +39,18 @@ type Status uint16
 type GConn struct {
 	sync.Once
 	*net.UDPConn
-	f                uint8
-	s                Status
-	fromListenerData chan *v1.Message
-	recvWin          *v12.RWND
-	sendWin          *v12.SWND
-	raddr            *GAddr
-	laddr            *GAddr
-	lis              *GListener
-	//finAck           chan bool
-	fin1SeqU uint32
-	fin2SeqW uint32
+	f                  uint8
+	s                  Status
+	recvWin            *v12.RWND
+	sendWin            *v12.SWND
+	raddr              *GAddr
+	laddr              *GAddr
+	lis                *GListener
+	fin1SeqU, fin2SeqW uint32
 }
 
 func (g *GConn) init() {
 	g.Do(func() {
-		g.fromListenerData = make(chan *v1.Message)
 		g.recvWin = &v12.RWND{
 			AckSender: func(ack uint32, receiveWinSize uint16) (err error) {
 				m := &v1.Message{}
