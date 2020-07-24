@@ -41,16 +41,12 @@ type SegmentSender func(seq uint32, bs []byte) (err error)
 type SWND struct {
 	sync.Once
 	sync.RWMutex
-	SegmentSender SegmentSender
-	sentC         int64
-	ackSeqCache   *sync.Map // map[uint32]bool      // for slide head to right
-	//ackSeqCache          map[uint32]bool      // for slide head to right
-	readySend       *ds.ByteBlockChan // from app , cache data , wait for send
-	segResendCancel *sync.Map         // map[uint32]chan bool // for cancel resend
-	//segResendCancel       map[uint32]chan bool // for cancel resend
-	//segResendQuick        map[uint32]chan bool // for quick resend
-	segResendQuick *sync.Map //map[uint32]chan bool // for quick resend
-	//quickResendAckNum     map[uint32]*uint8    // for quick resend
+	SegmentSender      SegmentSender
+	sentC              int64
+	ackSeqCache        *sync.Map            // map[uint32]bool      // for slide head to right
+	readySend          *ds.ByteBlockChan    // from app , cache data , wait for send
+	segResendCancel    *sync.Map            // map[uint32]chan bool // for cancel resend
+	segResendQuick     *sync.Map            //map[uint32]chan bool // for quick resend
 	quickResendAckNum  *sync.Map            // map[uint32]*uint8    // for quick resend
 	cancelResendResult map[uint32]chan bool // for ack progress
 	quickResendResult  map[uint32]chan bool // for ack progress
@@ -61,7 +57,7 @@ type SWND struct {
 	headSeq            uint32               // current head seq , location is head
 	tailSeq            uint32               // current tail seq , location is tail
 	ssthresh           int64                // ssthresh
-	rttd, rtts, rto    float64              //ns
+	rttd, rtts, rto    float64              // ns
 	closed             chan bool
 	closeFinish        chan bool
 }
@@ -82,13 +78,11 @@ func (s *SWND) Write(bs []byte) {
 // RecvAckSegment
 func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) {
 	s.init()
-	//s.Lock()
 	//s.recvWinSize = rule.DefRecWinSize // todo
 	//s.comSendWinSize()
 	//s.recvWinSize = int64(s.sendAbleNum(winSize, ack)) + s.sentC
 	//s.comSendWinSize()
 	defer func() {
-		//s.Unlock()
 		s.trimAck()
 		s.send(true)
 	}()
@@ -119,44 +113,29 @@ func (s *SWND) init() {
 		s.rtts = def_rtt
 		s.rttd = def_rtt
 		s.readySend = &ds.ByteBlockChan{Size: 0}
-		//s.segResendCancel = map[uint32]chan bool{}
 		s.segResendCancel = &sync.Map{}
 		s.segResendQuick = &sync.Map{}
-		//s.segResendQuick = map[uint32]chan bool{}
 		s.cancelResendResult = map[uint32]chan bool{}
 		s.quickResendResult = map[uint32]chan bool{}
-		s.quickResendAckNum = &sync.Map{} //map[uint32]*uint8{}
-		//s.quickResendAckNum = map[uint32]*uint8{}
-		//s.ackSeqCache = map[uint32]bool{}
-		s.ackSeqCache = &sync.Map{} //map[uint32]bool{}
+		s.quickResendAckNum = &sync.Map{}
+		s.ackSeqCache = &sync.Map{}
 		s.flushTimer = time.NewTimer(checkWinInterval)
 		s.closed = make(chan bool)
 		s.closeFinish = make(chan bool)
 		s.loopPrint()
 		s.loopFlush()
-		go func() {
-			//for {
-			//<-time.After(10 * time.Millisecond)
-			//s.trimAck()
-			//s.send(true)
-			//}
-		}()
 	})
 }
 func (s *SWND) trimAck() {
-	//s.Lock()
 	defer func() {
 		log.Println("SWND : trimAck , sent len is", s.sentC)
-		//s.Unlock()
 	}()
 	for {
 		_, ok := s.ackSeqCache.Load(s.headSeq)
-		//_, ok := s.ackSeqCache[s.headSeq]
 		if !ok {
 			return
 		}
 		s.ackSeqCache.Delete(s.headSeq)
-		//delete(s.ackSeqCache, s.headSeq)
 		s.incSeq(&s.headSeq, 1)
 		atomic.AddInt64(&s.sentC, -1)
 	}
@@ -211,10 +190,8 @@ func (s *SWND) send(checkMSS bool) {
 func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 	t := time.NewTimer(time.Duration(int64(s.rto)) * time.Nanosecond)
 	reSendCancel := make(chan bool)
-	//s.segResendCancel[seq] = reSendCancel
 	s.segResendCancel.Store(seq, reSendCancel)
 	reSendQuick := make(chan bool)
-	//s.segResendQuick[seq] = reSendQuick
 	s.segResendQuick.Store(seq, reSendQuick)
 	select {
 	case <-reSendCancel:
@@ -238,15 +215,12 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 			}
 			s.comSendWinSize()
 			s.comRTO(float64(rttme))
-			log.Println("SWND : rttm is", rttme, ", readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", s.rto)
+			log.Println("SWND : rttm is", rttme, ", readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
 			t.Stop()
 			s.resetQuickResendAckNum(seq)
 			s.segResendCancel.Delete(seq)
-			//delete(s.segResendCancel, seq)
-			//delete(s.segResendQuick, seq)
 			s.segResendQuick.Delete(seq)
 
-			//s.ackSeqCache[seq] = true
 			s.ackSeqCache.Store(seq, true)
 			// cancel result
 			s.cancelResendResult[seq] <- true
@@ -299,7 +273,7 @@ func (s *SWND) readASegment(checkMSS bool) (bs []byte) {
 }
 
 func (s *SWND) sendCallBack(tag string, seq uint32, bs []byte) {
-	log.Println("SWND : send , tag is", tag, ", seq is [", seq, "] , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", s.rto)
+	log.Println("SWND : send , tag is", tag, ", seq is [", seq, "] , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
 	err := s.SegmentSender(seq, bs)
 	if err != nil {
 		log.Println("SWND : send , tag is", tag, ", err , err is", err.Error())
@@ -422,7 +396,7 @@ func (s *SWND) ack(ack uint32) (match bool) {
 		log.Println("SWND : find resend cancel , origin ack is", originAck)
 		select {
 		case <-r:
-			log.Println("SWND : cancel resend finish , origin ack is", originAck, ", rto is", s.rto)
+			log.Println("SWND : cancel resend finish , origin ack is", originAck, ", rto is", int64(s.rto))
 			return true
 		case <-time.After(1000 * time.Millisecond):
 			log.Println("SWND : cancel resend timeout , origin ack is", originAck)
@@ -443,7 +417,7 @@ func (s *SWND) loopPrint() {
 			case <-s.closed:
 				return
 			default:
-				log.Println("SWND : print , sent len is ", s.sentC, ", readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", recv win size is", s.recvWinSize, ", cong win size is", s.congWinSize, ", rto is", s.rto)
+				log.Println("SWND : print , sent len is ", s.sentC, ", readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", recv win size is", s.recvWinSize, ", cong win size is", s.congWinSize, ", rto is", int64(s.rto))
 				time.Sleep(1000 * time.Millisecond)
 			}
 

@@ -31,12 +31,11 @@ type AckSender func(ack uint32, receiveWinSize uint16) (err error)
 //  Receive window
 type RWND struct {
 	sync.Once
-	//sync.RWMutex
 	AckSender   AckSender
 	recved      *ds.ByteBlockChan
-	recvWinSize int32             // recv window size
-	readyRecv   *sync.Map//map[uint32]*rData // cache recved package
-	tailSeq     uint32            // current tail seq , location is tail
+	recvWinSize int32     // recv window size
+	readyRecv   *sync.Map //map[uint32]*rData // cache recved package
+	tailSeq     uint32    // current tail seq , location is tail
 	ackWin      bool
 	closed      chan bool
 }
@@ -85,8 +84,6 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 // RecvSegment
 func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 	r.init()
-	//r.Lock()
-	//defer r.Unlock()
 	select {
 	case <-r.closed:
 		log.Println("RWND : window is closed")
@@ -102,12 +99,10 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 		return
 	}
 	rdI, ok := r.readyRecv.Load(seqN)
-	rd,_:=rdI.(*rData)
-	//rd, ok := r.readyRecv[seqN]
+	rd, _ := rdI.(*rData)
 	if !ok {
 		rd = &rData{}
-		//r.readyRecv[seqN] = rd
-		r.readyRecv.Store(seqN,rd)
+		r.readyRecv.Store(seqN, rd)
 	}
 	if !ok || !rd.isAlive {
 		r.incRecvWinSize(-1)
@@ -115,7 +110,9 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 	rd.isAlive = true
 	rd.seq = seqN
 	rd.bs = bs
+	//s := time.Now().Nanosecond()
 	r.recv()
+	//fmt.Println("recv time is", time.Now().Nanosecond()-s)
 	return
 }
 
@@ -124,7 +121,6 @@ func (r *RWND) init() {
 		r.recvWinSize = int32(rule.DefRecWinSize)
 		r.tailSeq = rule.MinSeqN
 		r.recved = &ds.ByteBlockChan{Size: 0}
-		//r.readyRecv = map[uint32]*rData{}
 		r.readyRecv = &sync.Map{}
 		//r.loopAckWin()
 		r.loopPrint()
@@ -135,10 +131,9 @@ func (r *RWND) init() {
 func (r *RWND) recv() {
 	firstCycle := true // eg. if no firstCycle , cache have seq 9 , 9 ack will be sent twice
 	for {
-		//d := r.readyRecv[r.tailSeq]
-		di,ok := r.readyRecv.Load(r.tailSeq)
-		d,_:=di.(*rData)
-		if !ok||d == nil || !d.isAlive {
+		di, ok := r.readyRecv.Load(r.tailSeq)
+		d, _ := di.(*rData)
+		if !ok || d == nil || !d.isAlive {
 			if !firstCycle {
 				return
 			}
