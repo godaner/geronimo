@@ -15,16 +15,16 @@ import (
 func TestDial(t *testing.T) {
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
-	go func() {
-		r()
-	}()
+
 	go func() {
 		s()
 	}()
+
+	r()
 	//go func() {
 	//	s()
 	//}()
-	time.Sleep(1000000 * time.Hour)
+	//time.Sleep(1000000 * time.Hour)
 }
 func r() {
 	l, err := Listen(&GAddr{
@@ -35,7 +35,7 @@ func r() {
 		panic(err)
 	}
 	i := 1
-	for {
+	//for {
 		c2, err := l.Accept()
 		fmt.Println("Listen", c2.(*GConn).Status() == StatusEstablished)
 
@@ -44,7 +44,7 @@ func r() {
 		}
 		s := "./dst" + fmt.Sprint(i)
 		i++
-		go func() {
+		//go func() {
 			file, err := os.Create(s)
 			if err != nil {
 				panic(err)
@@ -54,7 +54,7 @@ func r() {
 			for i := 0; ; i++ {
 				n, err := c2.Read(b)
 				if err != nil {
-					fmt.Println(err)
+					fmt.Println("read",err)
 					break
 				}
 				_, err = file.Write(b[:n])
@@ -64,8 +64,9 @@ func r() {
 			}
 
 			file.Close()
-		}()
-	}
+			fmt.Println("ccc")
+		//}()
+	//}
 }
 func s() {
 	begin := time.Now()
@@ -77,14 +78,14 @@ func s() {
 		panic(err)
 	}
 	fmt.Println("Dial", conn.Status() == StatusEstablished)
-	info, err := os.Stat("./src2")
+	info, err := os.Stat("./src1")
 	if err != nil {
 		panic(err)
 	}
 	size := info.Size()
 	fmt.Println(size)
 
-	file, err := os.Open("./src2")
+	file, err := os.Open("./src1")
 
 	if err != nil {
 		panic(err)
