@@ -119,7 +119,7 @@ func s() {
 
 	fmt.Println(end.Unix() - begin.Unix())
 }
-func md5S(bs []byte)(s string){
+func md5S(bs []byte) (s string) {
 	w := md5.New()
 	io.WriteString(w, string(bs))
 	md5str2 := fmt.Sprintf("%x", w.Sum(nil))
@@ -129,7 +129,7 @@ func TestGConn_Read(t *testing.T) {
 	go http.ListenAndServe(":8888", nil)
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
-	go func(){
+	go func() {
 		//<-time.After(600*time.Millisecond)
 		//panic("log")
 	}()
@@ -137,7 +137,7 @@ func TestGConn_Read(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		s = append(s, []byte("kecasdadad")...)
 	}
-	smd5:=md5S(s)
+	smd5 := md5S(s)
 	go func() {
 		l, err := Listen(&GAddr{
 			IP:   "192.168.6.6",
@@ -150,13 +150,13 @@ func TestGConn_Read(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		i:=uint64(0)
+		i := uint64(0)
 		for {
 			bs := make([]byte, len(s), len(s))
-			n,err:=io.ReadFull(c2, bs)
-			fmt.Println(i,n,err,string(bs))
-			ssmd5:=md5S(bs)
-			if ssmd5!=smd5{
+			n, err := io.ReadFull(c2, bs)
+			fmt.Println(i, n, err, string(bs))
+			ssmd5 := md5S(bs)
+			if ssmd5 != smd5 {
 				panic("not right md5")
 			}
 			i++
@@ -177,5 +177,64 @@ func TestGConn_Read(t *testing.T) {
 		}
 	}()
 
+	time.Sleep(1000 * time.Second)
+}
+func TestGConn_Close(t *testing.T) {
+
+	devNull, _ := os.Open(os.DevNull)
+	log.SetOutput(devNull)
+	s := []byte{}
+	for i := 0; i < 10; i++ {
+		s = append(s, []byte("kecasdadad")...)
+	}
+	smd5 := md5S(s)
+	go func() {
+		l, err := Listen(&GAddr{
+			IP:   "192.168.6.6",
+			Port: 2222,
+		})
+		if err != nil {
+			panic(err)
+		}
+		c2, err := l.Accept()
+		if err != nil {
+			panic(err)
+		}
+		i := uint64(0)
+		for {
+			bs := make([]byte, len(s), len(s))
+			n, err := io.ReadFull(c2, bs)
+			fmt.Println(i, n, err, string(bs))
+			ssmd5 := md5S(bs)
+			if ssmd5 != smd5 {
+				panic("not right md5")
+			}
+			i++
+		}
+	}()
+	time.Sleep(500 * time.Millisecond)
+	c1, err := Dial(&GAddr{
+		IP:   "192.168.6.6",
+		Port: 2222,
+	})
+	if err != nil {
+		panic(err)
+	}
+	go func() {
+		go func() {
+			time.Sleep(3 * time.Second)
+			fmt.Println("c1 close start ")
+			c1.Close()
+			fmt.Println("c1 status", c1.Status())
+		}()
+		for i := 0; i < 10; i++ {
+			_, err := c1.Write(s)
+			fmt.Println("send　：", err)
+			if err != nil {
+				break
+			}
+			time.Sleep(1*time.Second)
+		}
+	}()
 	time.Sleep(1000 * time.Second)
 }

@@ -188,8 +188,8 @@ func (m *Message) SYNACK(seqN, ackN uint32, winSize uint16) {
 func (m *Message) ACK(ackN uint32, winSize uint16) {
 	m.newMessage(rule.FlagACK, 0, ackN, winSize)
 }
-func (m *Message) ACKN(ackN, seqN uint32, winSize uint16) {
-	m.newMessage(rule.FlagACK, 0, seqN, winSize)
+func (m *Message) ACKN(seqN, ackN uint32, winSize uint16) {
+	m.newMessage(rule.FlagACK, seqN, ackN, winSize)
 }
 func (m *Message) FINACK(seqN, ackN uint32, winSize uint16) {
 	m.newMessage(rule.FlagFIN|rule.FlagACK, seqN, ackN, winSize)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/godaner/geronimo/rule"
 	"github.com/godaner/geronimo/win/ds"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -37,7 +38,7 @@ type RWND struct {
 	readyRecv   *sync.Map //map[uint32]*rData // cache recved package
 	tailSeq     uint32    // current tail seq , location is tail
 	ackWin      bool
-	closed      chan bool
+	closeSignal chan bool
 }
 
 // rData
@@ -64,10 +65,19 @@ func (r *rData) String() string {
 // Read
 func (r *RWND) Read(bs []byte) (n int, err error) {
 	r.init()
+	select {
+	case <-r.closeSignal:
+		return 0, io.EOF
+	default:
+
+	}
 	if len(bs) <= 0 {
 		return 0, nil
 	}
-	bs[0], _ = r.recved.BlockPop()
+	bs[0], _, err = r.recved.BlockPopWithStop(r.closeSignal)
+	if err != nil {
+		return 0, io.EOF
+	}
 	n = 1
 	for i := 1; i < len(bs); i++ {
 		usable, b, _ := r.recved.Pop()
@@ -85,8 +95,8 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 	r.init()
 	select {
-	case <-r.closed:
-		log.Println("RWND : window is closed")
+	case <-r.closeSignal:
+		log.Println("RWND : window is closeSignal")
 		return
 	default:
 
@@ -122,6 +132,7 @@ func (r *RWND) init() {
 		r.tailSeq = rule.MinSeqN
 		r.recved = &ds.ByteBlockChan{Size: 0}
 		r.readyRecv = &sync.Map{}
+		r.closeSignal = make(chan bool)
 		//r.loopAckWin()
 		r.loopPrint()
 	})
@@ -199,7 +210,7 @@ func (r *RWND) loopPrint() {
 	go func() {
 		for {
 			select {
-			case <-r.closed:
+			case <-r.closeSignal:
 				return
 			default:
 				log.Println("RWND : print , recved len is", r.recved.Len(), ", recv win size is", r.getRecvWinSize(), ", ackWin is", r.ackWin)
@@ -218,7 +229,7 @@ func (r *RWND) loopAckWin() {
 		defer t.Stop()
 		for {
 			select {
-			case <-r.closed:
+			case <-r.closeSignal:
 				return
 			case <-t.C:
 				rws := r.getRecvWinSize()
@@ -245,6 +256,7 @@ func (r *RWND) inRecvSeqRange(seq uint32) (yes bool) {
 }
 
 func (r *RWND) Close() (err error) {
-	close(r.closed)
+	r.init()
+	close(r.closeSignal)
 	return nil
 }

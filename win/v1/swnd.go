@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"errors"
 	"fmt"
 	"github.com/godaner/geronimo/rule"
 	"github.com/godaner/geronimo/win/ds"
@@ -46,7 +47,7 @@ type SWND struct {
 	ackSeqCache        *sync.Map            // map[uint32]bool      // for slide head to right
 	readySend          *ds.ByteBlockChan    // from app , cache data , wait for send
 	segResendCancel    *sync.Map            // map[uint32]chan bool // for cancel resend
-	segResendQuick     *sync.Map            //map[uint32]chan bool // for quick resend
+	segResendQuick     *sync.Map            // map[uint32]chan bool // for quick resend
 	quickResendAckNum  *sync.Map            // map[uint32]*uint8    // for quick resend
 	cancelResendResult map[uint32]chan bool // for ack progress
 	quickResendResult  map[uint32]chan bool // for ack progress
@@ -58,21 +59,23 @@ type SWND struct {
 	tailSeq            uint32               // current tail seq , location is tail
 	ssthresh           int64                // ssthresh
 	rttd, rtts, rto    float64              // ns
-	closed             chan bool
-	closeFinish        chan bool
+	closeSignal        chan bool
+	sendFinish         chan bool
+	//closeFinish        chan bool
 }
 
 // Write
-func (s *SWND) Write(bs []byte) {
+func (s *SWND) Write(bs []byte) (err error) {
 	s.init()
 	select {
-	case <-s.closed:
-		log.Println("SWND : window is closed")
-		return
+	case <-s.closeSignal:
+		log.Println("SWND : window is closeSignal")
+		return errors.New("closeSignal")
 	default:
-		s.readySend.BlockPushs(bs...)
-		s.send(true)
 	}
+	s.readySend.BlockPushs(bs...)
+	s.send(true)
+	return nil
 }
 
 // RecvAckSegment
@@ -120,8 +123,9 @@ func (s *SWND) init() {
 		s.quickResendAckNum = &sync.Map{}
 		s.ackSeqCache = &sync.Map{}
 		s.flushTimer = time.NewTimer(checkWinInterval)
-		s.closed = make(chan bool)
-		s.closeFinish = make(chan bool)
+		s.closeSignal = make(chan bool)
+		s.closeSignal = make(chan bool)
+		s.sendFinish = make(chan bool)
 		s.loopPrint()
 		s.loopFlush()
 	})
@@ -367,7 +371,6 @@ func (s *SWND) quickResendSegment(ack uint32) (match bool) {
 
 // resetQuickResendAckNum
 func (s *SWND) resetQuickResendAckNum(ack uint32) {
-	//num, ok := s.quickResendAckNum[ack]
 	numI, ok := s.quickResendAckNum.Load(ack)
 	if !ok {
 		return
@@ -414,7 +417,7 @@ func (s *SWND) loopPrint() {
 	go func() {
 		for {
 			select {
-			case <-s.closed:
+			case <-s.closeSignal:
 				return
 			default:
 				log.Println("SWND : print , sent len is ", s.sentC, ", readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", recv win size is", s.recvWinSize, ", cong win size is", s.congWinSize, ", rto is", int64(s.rto))
@@ -432,10 +435,15 @@ func (s *SWND) loopFlush() {
 		defer s.flushTimer.Stop()
 		for {
 			select {
-			case <-s.closed:
-				<-time.After(10 * time.Millisecond)
-				s.send(false)        // clear data
-				close(s.closeFinish) // todo ??
+			case <-s.closeSignal:
+				for {
+					<-time.After(10 * time.Millisecond)
+					if s.readySend.Len() <= 0 {
+						break
+					}
+					s.send(false) // clear data
+				}
+				close(s.sendFinish)
 				return
 			case <-s.flushTimer.C:
 				s.send(false)
@@ -445,10 +453,8 @@ func (s *SWND) loopFlush() {
 }
 
 func (s *SWND) Close() (err error) {
-	close(s.closed)
+	s.init()
+	close(s.closeSignal)
+	<-s.sendFinish
 	return nil
-}
-
-func (s *SWND) CloseFinish() (sig chan bool) {
-	return s.closeFinish
 }

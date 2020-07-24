@@ -39,18 +39,20 @@ type Status uint16
 type GConn struct {
 	sync.Once
 	*net.UDPConn
-	f                  uint8
-	s                  Status
-	recvWin            *v12.RWND
-	sendWin            *v12.SWND
-	raddr              *GAddr
-	laddr              *GAddr
-	lis                *GListener
-	fin1SeqU, fin2SeqW uint32
+	f                            uint8
+	s                            Status
+	recvWin                      *v12.RWND
+	sendWin                      *v12.SWND
+	raddr                        *GAddr
+	laddr                        *GAddr
+	lis                          *GListener
+	fin1SeqU, fin1SeqV, fin2SeqW uint32
+	closeFinish                  chan bool
 }
 
 func (g *GConn) init() {
 	g.Do(func() {
+		g.closeFinish = make(chan bool)
 		g.recvWin = &v12.RWND{
 			AckSender: func(ack uint32, receiveWinSize uint16) (err error) {
 				m := &v1.Message{}
@@ -94,14 +96,10 @@ func (g *GConn) handleMessage(m *v1.Message) {
 		g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
 		return
 	}
-	if m.Flag()&rule.FlagACK == rule.FlagACK {
-		g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
-		return
-	}
 	if g.s == StatusEstablished && m.Flag()&rule.FlagFIN == rule.FlagFIN {
-		g.recvWin.Close()
-		seq := uint32(rand.Int31n(2<<16 - 2))
-		m.ACKN(m.SeqN()+1, seq, 0)
+		g.fin1SeqU = m.SeqN()
+		g.fin1SeqV = uint32(rand.Int31n(2<<16 - 2))
+		m.ACKN(g.fin1SeqV, g.fin1SeqU+1, 0)
 		err := g.sendMessage(m)
 		if err != nil {
 			log.Println("GConn : handleMessage ACKN StatusCloseWait err", err)
@@ -109,18 +107,18 @@ func (g *GConn) handleMessage(m *v1.Message) {
 		g.s = StatusCloseWait
 		go func() {
 			g.sendWin.Close()
-			<-g.sendWin.CloseFinish()
-			g.s = StatusLastAck
 			g.fin2SeqW = uint32(rand.Int31n(2<<16 - 2))
 			m.FINACK(g.fin2SeqW, g.fin1SeqU+1, 0)
 			err := g.sendMessage(m)
 			if err != nil {
 				log.Println("GConn : handleMessage ACKN StatusLastAck err", err)
 			}
+			g.s = StatusLastAck
 		}()
 		return
 	}
 	if g.s == StatusFinWait1 && m.Flag()&rule.FlagACK == rule.FlagACK {
+		g.fin1SeqV = m.SeqN()
 		if m.AckN()-1 != g.fin1SeqU {
 			log.Println("GConn : handleMessage fin1SeqU StatusFinWait2 err", m.AckN()-1, g.fin1SeqU)
 			return
@@ -129,6 +127,7 @@ func (g *GConn) handleMessage(m *v1.Message) {
 		return
 	}
 	if g.s == StatusFinWait2 && m.Flag()&rule.FlagACK == rule.FlagACK && m.Flag()&rule.FlagFIN == rule.FlagFIN {
+		g.fin2SeqW = m.SeqN()
 		if m.AckN()-1 != g.fin1SeqU {
 			log.Println("GConn : handleMessage fin1SeqU StatusTimeWait err", m.AckN()-1, g.fin1SeqU)
 			return
@@ -140,6 +139,7 @@ func (g *GConn) handleMessage(m *v1.Message) {
 		}
 		g.s = StatusTimeWait
 		go func() {
+			g.closeFinish <- true
 			<-time.After(time.Duration(2*msl) * time.Second)
 			g.recvWin.Close()
 			g.rmFromLis()
@@ -157,7 +157,12 @@ func (g *GConn) handleMessage(m *v1.Message) {
 			return
 		}
 		g.rmFromLis()
+		g.recvWin.Close()
 		g.s = StatusClosed
+		return
+	}
+	if m.Flag()&rule.FlagACK == rule.FlagACK {
+		g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
 		return
 	}
 	panic("no handler")
@@ -190,13 +195,12 @@ func (g *GConn) Read(b []byte) (n int, err error) {
 
 func (g *GConn) Write(b []byte) (n int, err error) {
 	g.init()
-	g.sendWin.Write(b)
-	return len(b), nil
+	return len(b), g.sendWin.Write(b)
 }
 
 func (g *GConn) Close() error {
 	g.init()
-	return g.close() // todo how to close ???
+	return g.close()
 }
 
 func (g *GConn) LocalAddr() net.Addr {
@@ -230,14 +234,15 @@ func (g *GConn) Status() (s Status) {
 }
 
 func (g *GConn) close() (err error) {
+	g.sendWin.Close()
 	m := &v1.Message{}
-	fin1Seq := uint32(rand.Int31n(2<<16 - 2))
-	m.FIN(fin1Seq)
+	g.fin1SeqU = uint32(rand.Int31n(2<<16 - 2))
+	m.FIN(g.fin1SeqU)
 	err = g.sendMessage(m)
 	if err != nil {
 		return err
 	}
-	g.sendWin.Close()
 	g.s = StatusFinWait1
+	<-g.closeFinish
 	return nil
 }

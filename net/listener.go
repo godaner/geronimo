@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -125,7 +126,7 @@ func (g *GListener) init() {
 						}()
 						return
 					}
-
+					fmt.Println(strconv.FormatUint(uint64(m1.Flag()),2))
 					panic("unknown err")
 				}()
 			}
