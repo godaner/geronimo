@@ -85,7 +85,9 @@ func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) {
 	//s.comSendWinSize()
 	//s.recvWinSize = int64(s.sendAbleNum(winSize, ack)) + s.sentC
 	//s.comSendWinSize()
+	s.Lock()
 	defer func() {
+		s.Unlock()
 		s.trimAck()
 		s.send(true)
 	}()
@@ -454,7 +456,11 @@ func (s *SWND) loopFlush() {
 
 func (s *SWND) Close() (err error) {
 	s.init()
-	close(s.closeSignal)
-	<-s.sendFinish
+	select {
+	case <-s.closeSignal:
+	default:
+		close(s.closeSignal)
+		<-s.sendFinish
+	}
 	return nil
 }

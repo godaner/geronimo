@@ -31,6 +31,7 @@ type AckSender func(ack uint32, receiveWinSize uint16) (err error)
 // RWND
 //  Receive window
 type RWND struct {
+	sync.Mutex
 	sync.Once
 	AckSender   AckSender
 	recved      *ds.ByteBlockChan
@@ -99,8 +100,9 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 		log.Println("RWND : window is closeSignal")
 		return
 	default:
-
 	}
+	r.Lock()
+	defer r.Unlock()
 	log.Println("RWND : recv seq is [", seqN, "]")
 	if !r.inRecvSeqRange(seqN) {
 		ackN := seqN
@@ -120,9 +122,7 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
 	rd.isAlive = true
 	rd.seq = seqN
 	rd.bs = bs
-	//s := time.Now().Nanosecond()
 	r.recv()
-	//fmt.Println("recv time is", time.Now().Nanosecond()-s)
 	return
 }
 
@@ -257,6 +257,10 @@ func (r *RWND) inRecvSeqRange(seq uint32) (yes bool) {
 
 func (r *RWND) Close() (err error) {
 	r.init()
-	close(r.closeSignal)
+	select {
+	case <-r.closeSignal:
+	default:
+		close(r.closeSignal)
+	}
 	return nil
 }

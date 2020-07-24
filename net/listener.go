@@ -126,7 +126,7 @@ func (g *GListener) init() {
 						}()
 						return
 					}
-					fmt.Println(strconv.FormatUint(uint64(m1.Flag()),2))
+					log.Println("gc",gc.s,"flag",strconv.FormatUint(uint64(m1.Flag()),2))
 					panic("unknown err")
 				}()
 			}

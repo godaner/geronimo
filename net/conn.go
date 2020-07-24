@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -166,6 +167,7 @@ func (g *GConn) handleMessage(m *v1.Message) {
 		g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
 		return
 	}
+	log.Println("gc",g.s,"flag",strconv.FormatUint(uint64(m.Flag()),2))
 	panic("no handler")
 }
 func (g *GConn) rmFromLis() {

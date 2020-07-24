@@ -2,13 +2,14 @@ package ds
 
 import (
 	"errors"
+	"github.com/godaner/geronimo/rule"
 	"sync"
 	"sync/atomic"
 )
 
 const (
-	//defSize = 2 * rule.DefRecWinSize * rule.MSS
-	defSize = 1<<32 - 1
+	defSize = 2 * rule.DefRecWinSize * rule.MSS
+	//defSize = 1<<32 - 1
 )
 
 type ByteBlockChan struct {
