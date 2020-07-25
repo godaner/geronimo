@@ -17,6 +17,8 @@ const (
 	udpmss            = 1472
 	syncTimeout       = 2000
 	lastSynAckTimeout = 1000
+	retryTime         = 500
+	retryInterval     = 5
 )
 const (
 	_                 = iota
@@ -98,42 +100,43 @@ func (g *GConn) init() {
 // handleMessage
 func (g *GConn) handleMessage(m *v1.Message) {
 	g.init()
+	// body
 	if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
 		g.payloadMessageHandler(m)
 		return
 	}
-	// connect
-	if g.s == StatusListen && m.Flag()&rule.FlagSYN == rule.FlagSYN {
-		g.connectSynMessageHandler(m)
+	if m.Flag()&rule.FlagACK == rule.FlagACK {
+		g.ackMessageHandler(m)
 		return
 	}
-	if g.s == StatusSynSent && m.Flag()&rule.FlagACK == rule.FlagACK && m.Flag()&rule.FlagSYN == rule.FlagSYN {
-		g.connectSynAckMessageHandler(m)
+	// syn
+	if m.Flag()&rule.FlagSYN1 == rule.FlagSYN1 {
+		g.syn1MessageHandler(m)
 		return
 	}
-	if g.s == StatusSynRecved && m.Flag()&rule.FlagACK == rule.FlagACK {
-		g.connectAckMessageHandler(m)
+	if m.Flag()&rule.FlagSYN2 == rule.FlagSYN2 {
+		g.syn2MessageHandler(m)
+		return
+	}
+	if m.Flag()&rule.FlagSYN3 == rule.FlagSYN3 {
+		g.syn3MessageHandler(m)
 		return
 	}
 	// fin
-	if g.s == StatusEstablished && m.Flag()&rule.FlagFIN == rule.FlagFIN {
-		g.finMessageHandler(m)
+	if m.Flag()&rule.FlagFIN1 == rule.FlagFIN1 {
+		g.fin1MessageHandler(m)
 		return
 	}
-	if g.s == StatusFinWait1 && m.Flag()&rule.FlagACK == rule.FlagACK {
-		g.fin1AckMessageHandler(m)
+	if m.Flag()&rule.FlagFIN2 == rule.FlagFIN2 {
+		g.fin2MessageHandler(m)
 		return
 	}
-	if g.s == StatusFinWait2 && m.Flag()&rule.FlagACK == rule.FlagACK && m.Flag()&rule.FlagFIN == rule.FlagFIN {
-		g.fin2AckMessageHandler(m)
+	if m.Flag()&rule.FlagFIN3 == rule.FlagFIN3 {
+		g.fin3MessageHandler(m)
 		return
 	}
-	if g.s == StatusLastAck && m.Flag()&rule.FlagACK == rule.FlagACK {
-		g.finLastAckMessageHandler(m)
-		return
-	}
-	if g.s >= StatusEstablished && m.Flag()&rule.FlagACK == rule.FlagACK {
-		g.ackMessageHandler(m)
+	if m.Flag()&rule.FlagFIN4 == rule.FlagFIN4 {
+		g.fin4MessageHandler(m)
 		return
 	}
 	log.Println("conn status is", g.s, ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
@@ -215,7 +218,7 @@ func (g *GConn) close() (err error) {
 	g.sendWin.Close()
 	m := &v1.Message{}
 	g.fin1SeqU = uint32(rand.Int31n(2<<16 - 2))
-	m.FIN(g.fin1SeqU)
+	m.FIN1(g.fin1SeqU)
 	err = g.sendMessage(m)
 	if err != nil {
 		return err

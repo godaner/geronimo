@@ -16,49 +16,49 @@ func (g *GConn) payloadMessageHandler(m *v1.Message) {
 	g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
 }
 
-// finMessageHandler
-func (g *GConn) finMessageHandler(m *v1.Message) {
+// fin1MessageHandler
+func (g *GConn) fin1MessageHandler(m *v1.Message) {
 	g.fin1SeqU = m.SeqN()
 	g.fin1SeqV = uint32(rand.Int31n(2<<16 - 2))
-	m.ACKN(g.fin1SeqV, g.fin1SeqU+1, 0)
+	m.FIN2(g.fin1SeqV, g.fin1SeqU+1)
 	err := g.sendMessage(m)
 	if err != nil {
-		log.Println("GConn : handleMessage ACKN StatusCloseWait err", err)
+		log.Println("GConn#fin1MessageHandler : handleMessage ACKN StatusCloseWait err", err)
 	}
 	g.s = StatusCloseWait
 	go func() {
 		g.sendWin.Close()
 		g.fin2SeqW = uint32(rand.Int31n(2<<16 - 2))
-		m.FINACK(g.fin2SeqW, g.fin1SeqU+1, 0)
+		m.FIN3(g.fin2SeqW, g.fin1SeqU+1)
 		err := g.sendMessage(m)
 		if err != nil {
-			log.Println("GConn : handleMessage ACKN StatusLastAck err", err)
+			log.Println("GConn#fin1MessageHandler : handleMessage ACKN StatusLastAck err", err)
 		}
 		g.s = StatusLastAck
 	}()
 }
 
-// fin1AckMessageHandler
-func (g *GConn) fin1AckMessageHandler(m *v1.Message) {
+// fin2MessageHandler
+func (g *GConn) fin2MessageHandler(m *v1.Message) {
 	g.fin1SeqV = m.SeqN()
 	if m.AckN()-1 != g.fin1SeqU {
-		log.Println("GConn : handleMessage fin1SeqU StatusFinWait2 err", m.AckN()-1, g.fin1SeqU)
+		log.Println("GConn#fin2MessageHandler : ack != sed u", m.AckN()-1, g.fin1SeqU)
 		return
 	}
 	g.s = StatusFinWait2
 }
 
-// fin2AckMessageHandler
-func (g *GConn) fin2AckMessageHandler(m *v1.Message) {
+// fin3MessageHandler
+func (g *GConn) fin3MessageHandler(m *v1.Message) {
 	g.fin2SeqW = m.SeqN()
 	if m.AckN()-1 != g.fin1SeqU {
-		log.Println("GConn : handleMessage fin1SeqU StatusTimeWait err", m.AckN()-1, g.fin1SeqU)
+		log.Println("GConn#fin3MessageHandler : ack != seq u", m.AckN()-1, g.fin1SeqU)
 		return
 	}
-	m.ACKN(g.fin1SeqU+1, g.fin2SeqW+1, 0)
+	m.FIN4(g.fin1SeqU+1, g.fin2SeqW+1)
 	err := g.sendMessage(m)
 	if err != nil {
-		log.Println("GConn : handleMessage ACKN StatusTimeWait err", err)
+		log.Println("GConn#fin3MessageHandler : send message err", err)
 	}
 	g.s = StatusTimeWait
 	go func() {
@@ -70,14 +70,14 @@ func (g *GConn) fin2AckMessageHandler(m *v1.Message) {
 	}()
 }
 
-// finLastAckMessageHandler
-func (g *GConn) finLastAckMessageHandler(m *v1.Message) {
+// fin4MessageHandler
+func (g *GConn) fin4MessageHandler(m *v1.Message) {
 	if m.AckN()-1 != g.fin2SeqW {
-		log.Println("GConn : handleMessage fin2SeqW StatusLastAck err", m.AckN()-1, g.fin2SeqW)
+		log.Println("GConn#fin4MessageHandler : ack != seq w", m.AckN()-1, g.fin2SeqW)
 		return
 	}
 	if m.SeqN()-1 != g.fin1SeqU {
-		log.Println("GConn : handleMessage fin1SeqU StatusLastAck err", m.SeqN()-1, g.fin1SeqU)
+		log.Println("GConn#fin4MessageHandler : seq != seq u", m.SeqN()-1, g.fin1SeqU)
 		return
 	}
 	g.rmFromLis()
@@ -92,19 +92,19 @@ func (g *GConn) ackMessageHandler(m *v1.Message) {
 	return
 }
 
-// connectSynAckMessageHandler
-func (g *GConn) connectSynAckMessageHandler(m *v1.Message) {
+// syn2MessageHandler
+func (g *GConn) syn2MessageHandler(m *v1.Message) {
 	g.synSeqY = m.SeqN()
 	if g.synSeqX+1 != m.AckN() {
-		log.Println("GConn#connectSynAckMessageHandler : syncack seq x != ack")
+		log.Println("GConn#syn2MessageHandler : syncack seq x != ack")
 		g.dialFinish <- errors.New("syncack err")
 		return
 	}
 	m1 := &v1.Message{}
-	m1.ACKN(g.synSeqX+1, g.synSeqY+1, 0)
+	m1.SYN3(g.synSeqX+1, g.synSeqY+1)
 	err := g.sendMessage(m1)
 	if err != nil {
-		log.Println("GConn#connectSynAckMessageHandler : Write err", err)
+		log.Println("GConn#syn2MessageHandler : Write err", err)
 		g.dialFinish <- errors.New("ack err")
 		return
 	}
@@ -112,29 +112,29 @@ func (g *GConn) connectSynAckMessageHandler(m *v1.Message) {
 	g.s = StatusEstablished
 }
 
-// connectAckMessageHandler
-func (g *GConn) connectAckMessageHandler(m *v1.Message) {
+// syn3MessageHandler
+func (g *GConn) syn3MessageHandler(m *v1.Message) {
 	if g.synSeqX+1 != m.SeqN() {
-		log.Println("GConn#connectAckMessageHandler : seq x != m.seq")
+		log.Println("GConn#syn3MessageHandler : seq x != m.seq")
 		return
 	}
 	if g.synSeqY+1 != m.AckN() {
-		log.Println("GConn#connectAckMessageHandler : seq y != m.ack")
+		log.Println("GConn#syn3MessageHandler : seq y != m.ack")
 		return
 	}
 	g.s = StatusEstablished
-	g.lis.acceptResult<-&acceptRes{c:g,err:nil}
+	g.lis.acceptResult <- &acceptRes{c: g, err: nil}
 }
 
-// connectSynMessageHandler
-func (g *GConn) connectSynMessageHandler(m *v1.Message) {
+// syn1MessageHandler
+func (g *GConn) syn1MessageHandler(m *v1.Message) {
 	g.synSeqX = m.SeqN()
 	g.synSeqY = uint32(rand.Int31n(2<<16 - 2))
 	m1 := &v1.Message{}
-	m1.SYNACK(g.synSeqY, g.synSeqX+1, 0)
+	m1.SYN2(g.synSeqY, g.synSeqX+1)
 	err := g.sendMessage(m1)
 	if err != nil {
-		log.Println("GConn#connectSynMessageHandler : Write err", err)
+		log.Println("GConn#syn1MessageHandler : Write err", err)
 		return
 	}
 	g.s = StatusSynRecved

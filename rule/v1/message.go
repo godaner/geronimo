@@ -11,12 +11,12 @@ import (
 type Header struct {
 	HSeqN    uint32
 	HAckN    uint32
-	HFlag    uint8
+	HFlag    uint16
 	HWinSize uint16
 	HAttrNum byte
 }
 
-func (h *Header) Flag() uint8 {
+func (h *Header) Flag() uint16 {
 	return h.HFlag
 }
 
@@ -70,7 +70,7 @@ func (m *Message) AckN() uint32 {
 	return m.Header.AckN()
 }
 
-func (m *Message) Flag() byte {
+func (m *Message) Flag() uint16 {
 	return m.Header.Flag()
 }
 
@@ -179,23 +179,35 @@ func (m *Message) UnMarshall(message []byte) (err error) {
 	return nil
 }
 
-func (m *Message) SYN(seqN uint32) {
-	m.newMessage(rule.FlagSYN, seqN, 0, 0)
+func (m *Message) SYN1(seqN uint32) {
+	m.newMessage(rule.FlagSYN1, seqN, 0, 0)
 }
-func (m *Message) SYNACK(seqN, ackN uint32, winSize uint16) {
-	m.newMessage(rule.FlagSYN|rule.FlagACK, seqN, ackN, winSize)
+
+func (m *Message) SYN2(seqN, ackN uint32) {
+	m.newMessage(rule.FlagSYN2, seqN, ackN, 0)
+}
+
+func (m *Message) SYN3(seqN, ackN uint32) {
+	m.newMessage(rule.FlagSYN3, seqN, ackN, 0)
+}
+
+func (m *Message) FIN1(seqN uint32) {
+	m.newMessage(rule.FlagFIN1, seqN, 0, 0)
+}
+
+func (m *Message) FIN2(seqN, ackN uint32) {
+	m.newMessage(rule.FlagFIN2, seqN, ackN, 0)
+}
+
+func (m *Message) FIN3(seqN, ackN uint32) {
+	m.newMessage(rule.FlagFIN3, seqN, ackN, 0)
+}
+
+func (m *Message) FIN4(seqN, ackN uint32) {
+	m.newMessage(rule.FlagFIN4, seqN, ackN, 0)
 }
 func (m *Message) ACK(ackN uint32, winSize uint16) {
 	m.newMessage(rule.FlagACK, 0, ackN, winSize)
-}
-func (m *Message) ACKN(seqN, ackN uint32, winSize uint16) {
-	m.newMessage(rule.FlagACK, seqN, ackN, winSize)
-}
-func (m *Message) FINACK(seqN, ackN uint32, winSize uint16) {
-	m.newMessage(rule.FlagFIN|rule.FlagACK, seqN, ackN, winSize)
-}
-func (m *Message) FIN(seqN uint32) {
-	m.newMessage(rule.FlagFIN, seqN, 0, 0)
 }
 func (m *Message) PAYLOAD(seqN uint32, payload []byte) {
 	m.newMessage(rule.FlagPAYLOAD, seqN, 0, 0)
@@ -206,10 +218,7 @@ func (m *Message) PAYLOAD(seqN uint32, payload []byte) {
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
-func (m *Message) SCANWIN(seqN uint32) {
-	m.newMessage(rule.FlagSCANWIN, seqN, 0, 0)
-}
-func (m *Message) newMessage(flag uint8, seqN, ackN uint32, winSize uint16) {
+func (m *Message) newMessage(flag uint16, seqN, ackN uint32, winSize uint16) {
 	m.Header = Header{
 		HFlag:    flag,
 		HSeqN:    seqN,

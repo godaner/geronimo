@@ -28,7 +28,7 @@ func (g *GConn) dial() (err error) {
 	// sync req
 	m1 := &v1.Message{}
 	g.synSeqX = uint32(rand.Int31n(2<<16 - 2))
-	m1.SYN(g.synSeqX)
+	m1.SYN1(g.synSeqX)
 	err = g.sendMessage(m1)
 	if err != nil {
 		return err
