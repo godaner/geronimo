@@ -1,7 +1,7 @@
 package net
 
 import (
-	"errors"
+	"fmt"
 	"github.com/godaner/geronimo/rule"
 	v1 "github.com/godaner/geronimo/rule/v1"
 	"log"
@@ -16,10 +16,89 @@ func (g *GConn) payloadMessageHandler(m *v1.Message) {
 	g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
 }
 
+// syn1MessageHandler
+func (g *GConn) syn1MessageHandler(m *v1.Message) {
+	g.synSeqX = m.SeqN()
+	if g.synSeqY == 0 {
+		g.synSeqY = uint32(rand.Int31n(2<<16 - 2))
+	}
+	m1 := &v1.Message{}
+	m1.SYN2(g.synSeqY, g.synSeqX+1)
+	err := g.sendMessage(m1)
+	if err != nil {
+		log.Println("GConn#syn1MessageHandler : sendMessage1 err", err)
+	}
+	g.s = g.maxStatus(StatusSynRecved, g.s)
+	go func() {
+		for {
+			if g.syn2RetryTime >= syn2RetryTime {
+				log.Println("GConn#syn1MessageHandler : syn2 fail , retry time is :" + fmt.Sprint(g.syn2RetryTime))
+				g.lis.gcs.Delete(g.raddr.toUDPAddr().String())
+				//g.Close()
+				return
+			}
+			select {
+			case <-g.syn2Finish:
+				return
+			case <-time.After(time.Duration(syn2Timeout) * time.Millisecond): // wait ack timeout
+				err = g.sendMessage(m1)
+				if err != nil {
+					log.Println("GConn#syn1MessageHandler : sendMessage2 err", err)
+				}
+				g.syn2RetryTime++
+			}
+		}
+	}()
+
+}
+
+// syn2MessageHandler
+func (g *GConn) syn2MessageHandler(m *v1.Message) {
+	g.synSeqY = m.SeqN()
+	if g.synSeqX+1 != m.AckN() {
+		log.Println("GConn#syn2MessageHandler : syncack seq x != ack")
+		return
+	}
+	m1 := &v1.Message{}
+	m1.SYN3(g.synSeqX+1, g.synSeqY+1)
+	err := g.sendMessage(m1)
+	if err != nil {
+		log.Println("GConn#syn2MessageHandler : Write err", err)
+		return
+	}
+	select {
+	case g.syn1Finish <- true:
+	default:
+		log.Println("GConn#syn2MessageHandler : 3 there are no syn1Finish suber")
+	}
+	g.s = g.maxStatus(StatusEstablished, g.s)
+}
+
+// syn3MessageHandler
+func (g *GConn) syn3MessageHandler(m *v1.Message) {
+	if g.synSeqX+1 != m.SeqN() {
+		log.Println("GConn#syn3MessageHandler : seq x != m.seq")
+		return
+	}
+	if g.synSeqY+1 != m.AckN() {
+		log.Println("GConn#syn3MessageHandler : seq y != m.ack")
+		return
+	}
+	select {
+	case g.syn2Finish <- true:
+	default:
+		log.Println("GConn#syn3MessageHandler : there are no syn2Finish suber")
+	}
+	g.s = StatusEstablished
+	g.lis.acceptResult <- &acceptRes{c: g, err: nil}
+}
+
 // fin1MessageHandler
 func (g *GConn) fin1MessageHandler(m *v1.Message) {
 	g.fin1SeqU = m.SeqN()
-	g.fin1SeqV = uint32(rand.Int31n(2<<16 - 2))
+	if g.fin1SeqV == 0 {
+		g.fin1SeqV = uint32(rand.Int31n(2<<16 - 2))
+	}
 	m.FIN2(g.fin1SeqV, g.fin1SeqU+1)
 	err := g.sendMessage(m)
 	if err != nil {
@@ -28,7 +107,9 @@ func (g *GConn) fin1MessageHandler(m *v1.Message) {
 	g.s = StatusCloseWait
 	go func() {
 		g.sendWin.Close()
-		g.fin2SeqW = uint32(rand.Int31n(2<<16 - 2))
+		if g.fin2SeqW == 0 {
+			g.fin2SeqW = uint32(rand.Int31n(2<<16 - 2))
+		}
 		m.FIN3(g.fin2SeqW, g.fin1SeqU+1)
 		err := g.sendMessage(m)
 		if err != nil {
@@ -90,52 +171,4 @@ func (g *GConn) fin4MessageHandler(m *v1.Message) {
 func (g *GConn) ackMessageHandler(m *v1.Message) {
 	g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
 	return
-}
-
-// syn2MessageHandler
-func (g *GConn) syn2MessageHandler(m *v1.Message) {
-	g.synSeqY = m.SeqN()
-	if g.synSeqX+1 != m.AckN() {
-		log.Println("GConn#syn2MessageHandler : syncack seq x != ack")
-		g.dialFinish <- errors.New("syncack err")
-		return
-	}
-	m1 := &v1.Message{}
-	m1.SYN3(g.synSeqX+1, g.synSeqY+1)
-	err := g.sendMessage(m1)
-	if err != nil {
-		log.Println("GConn#syn2MessageHandler : Write err", err)
-		g.dialFinish <- errors.New("ack err")
-		return
-	}
-	g.dialFinish <- nil
-	g.s = StatusEstablished
-}
-
-// syn3MessageHandler
-func (g *GConn) syn3MessageHandler(m *v1.Message) {
-	if g.synSeqX+1 != m.SeqN() {
-		log.Println("GConn#syn3MessageHandler : seq x != m.seq")
-		return
-	}
-	if g.synSeqY+1 != m.AckN() {
-		log.Println("GConn#syn3MessageHandler : seq y != m.ack")
-		return
-	}
-	g.s = StatusEstablished
-	g.lis.acceptResult <- &acceptRes{c: g, err: nil}
-}
-
-// syn1MessageHandler
-func (g *GConn) syn1MessageHandler(m *v1.Message) {
-	g.synSeqX = m.SeqN()
-	g.synSeqY = uint32(rand.Int31n(2<<16 - 2))
-	m1 := &v1.Message{}
-	m1.SYN2(g.synSeqY, g.synSeqX+1)
-	err := g.sendMessage(m1)
-	if err != nil {
-		log.Println("GConn#syn1MessageHandler : Write err", err)
-		return
-	}
-	g.s = StatusSynRecved
 }

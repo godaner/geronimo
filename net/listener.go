@@ -1,6 +1,7 @@
 package net
 
 import (
+	"errors"
 	v1 "github.com/godaner/geronimo/rule/v1"
 	"log"
 	"net"
@@ -25,12 +26,8 @@ type GListener struct {
 	c            *net.UDPConn
 	gcs          *sync.Map //map[string]*GConn
 	acceptResult chan *acceptRes
-	//estdResult   map[string]chan *estdRes
+	closeSignal  chan bool
 }
-//type estdRes struct {
-//	err error
-//	m   *v1.Message
-//}
 type acceptRes struct {
 	c   net.Conn
 	err error
@@ -39,11 +36,16 @@ type acceptRes struct {
 func (g *GListener) init() {
 	g.Do(func() {
 		g.acceptResult = make(chan *acceptRes)
-		//g.estdResult = map[string]chan *estdRes{}
+		g.closeSignal = make(chan bool)
 		g.gcs = &sync.Map{} //map[string]*GConn{}
 		go func() {
 			bs := make([]byte, udpmss, udpmss)
 			for {
+				select {
+				case <-g.closeSignal:
+					return
+				default:
+				}
 				func() {
 					n, rAddr, err := g.c.ReadFromUDP(bs)
 					if err != nil {
@@ -75,13 +77,26 @@ func (g *GListener) init() {
 func (g *GListener) Accept() (c net.Conn, err error) {
 	g.init()
 	r := <-g.acceptResult
+	if r == nil {
+		return nil, errors.New("nil accept")
+	}
 	return r.c, r.err
 }
 
 func (g *GListener) Close() error {
 	g.init()
-	//panic("implement me")
-	return nil // todo
+	select {
+	case <-g.closeSignal:
+	default:
+		close(g.closeSignal)
+	}
+	g.gcs.Range(func(key, value interface{}) bool {
+		c := value.(*GConn)
+		c.Close()
+		g.gcs.Delete(key)
+		return true
+	})
+	return nil
 }
 
 func (g *GListener) Addr() net.Addr {

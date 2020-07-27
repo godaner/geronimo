@@ -2,6 +2,7 @@ package net
 
 import (
 	"errors"
+	"fmt"
 	"github.com/godaner/geronimo/rule"
 	v1 "github.com/godaner/geronimo/rule/v1"
 	v12 "github.com/godaner/geronimo/win/v1"
@@ -14,11 +15,11 @@ import (
 )
 
 const (
-	udpmss            = 1472
-	syncTimeout       = 2000
-	lastSynAckTimeout = 1000
-	retryTime         = 500
-	retryInterval     = 5
+	udpmss        = 1472
+	syn1Timeout   = 2000
+	syn2Timeout   = 2000
+	syn1RetryTime = 4
+	syn2RetryTime = 4
 )
 const (
 	_                 = iota
@@ -33,6 +34,7 @@ const (
 	StatusTimeWait    = iota
 	StatusClosed      = iota
 )
+
 const (
 	_       = iota
 	FDial   = iota
@@ -41,6 +43,11 @@ const (
 const msl = 60 * 2
 
 type Status uint16
+
+func (s Status) String() string {
+	return fmt.Sprint(uint16(s))
+}
+
 type GConn struct {
 	sync.Once
 	*net.UDPConn
@@ -52,14 +59,35 @@ type GConn struct {
 	laddr                                          *GAddr
 	lis                                            *GListener
 	synSeqX, synSeqY, fin1SeqU, fin1SeqV, fin2SeqW uint32
-	dialFinish                                     chan error
+	syn1RetryTime, syn2RetryTime                   uint8
+	syn1Finish, syn2Finish                         chan bool
 	closeFinish                                    chan bool
+	mhs                                            map[uint16]messageHandler
+	closeSignal                                    chan bool
 }
 
 func (g *GConn) init() {
 	g.Do(func() {
-		g.dialFinish = make(chan error)
+		g.syn1Finish = make(chan bool)
+		g.syn2Finish = make(chan bool)
 		g.closeFinish = make(chan bool)
+		g.closeSignal = make(chan bool)
+		// init message handlers
+		g.mhs = map[uint16]messageHandler{
+			// syn
+			rule.FlagSYN1: g.syn1MessageHandler,
+			rule.FlagSYN2: g.syn2MessageHandler,
+			rule.FlagSYN3: g.syn3MessageHandler,
+			// fin
+			rule.FlagFIN1: g.fin1MessageHandler,
+			rule.FlagFIN2: g.fin2MessageHandler,
+			rule.FlagFIN3: g.fin3MessageHandler,
+			rule.FlagFIN4: g.fin4MessageHandler,
+			// body
+			rule.FlagPAYLOAD: g.payloadMessageHandler,
+			// ack
+			rule.FlagACK: g.ackMessageHandler,
+		}
 		g.recvWin = &v12.RWND{
 			AckSender: func(ack uint32, receiveWinSize uint16) (err error) {
 				m := &v1.Message{}
@@ -80,15 +108,22 @@ func (g *GConn) init() {
 				// recv udp
 				bs := make([]byte, udpmss, udpmss)
 				for {
-					func() {
-						n, err := g.UDPConn.Read(bs)
-						if err != nil {
-							panic(err)
-						}
-						m := &v1.Message{}
-						m.UnMarshall(bs[:n])
-						g.handleMessage(m)
-					}()
+					select {
+					case <-g.closeSignal:
+						return
+					default:
+						func() {
+							n, err := g.UDPConn.Read(bs)
+							if err != nil {
+								log.Println("GConn#init : Read err", err)
+								return
+							}
+							m := &v1.Message{}
+							m.UnMarshall(bs[:n])
+							g.handleMessage(m)
+						}()
+					}
+
 				}
 			}()
 			return
@@ -100,46 +135,12 @@ func (g *GConn) init() {
 // handleMessage
 func (g *GConn) handleMessage(m *v1.Message) {
 	g.init()
-	// body
-	if m.Flag()&rule.FlagPAYLOAD == rule.FlagPAYLOAD {
-		g.payloadMessageHandler(m)
+	mh, ok := g.mhs[m.Flag()]
+	if ok && mh != nil {
+		mh(m)
 		return
 	}
-	if m.Flag()&rule.FlagACK == rule.FlagACK {
-		g.ackMessageHandler(m)
-		return
-	}
-	// syn
-	if m.Flag()&rule.FlagSYN1 == rule.FlagSYN1 {
-		g.syn1MessageHandler(m)
-		return
-	}
-	if m.Flag()&rule.FlagSYN2 == rule.FlagSYN2 {
-		g.syn2MessageHandler(m)
-		return
-	}
-	if m.Flag()&rule.FlagSYN3 == rule.FlagSYN3 {
-		g.syn3MessageHandler(m)
-		return
-	}
-	// fin
-	if m.Flag()&rule.FlagFIN1 == rule.FlagFIN1 {
-		g.fin1MessageHandler(m)
-		return
-	}
-	if m.Flag()&rule.FlagFIN2 == rule.FlagFIN2 {
-		g.fin2MessageHandler(m)
-		return
-	}
-	if m.Flag()&rule.FlagFIN3 == rule.FlagFIN3 {
-		g.fin3MessageHandler(m)
-		return
-	}
-	if m.Flag()&rule.FlagFIN4 == rule.FlagFIN4 {
-		g.fin4MessageHandler(m)
-		return
-	}
-	log.Println("conn status is", g.s, ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
+	log.Println("GConn#handleMessage : no message handler be found , conn status is", g.s, ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
 	panic("no handler")
 }
 
@@ -211,9 +212,54 @@ func (g *GConn) Status() (s Status) {
 	return g.s
 }
 
+func (g *GConn) dial() (err error) {
+	g.init()
+	// sync req
+	m1 := &v1.Message{}
+	if g.synSeqX == 0 {
+		g.synSeqX = uint32(rand.Int31n(2<<16 - 2))
+	}
+	m1.SYN1(g.synSeqX)
+	err = g.sendMessage(m1)
+	if err != nil {
+		log.Println("GConn#dial sendMessage1 err , err is", err)
+	}
+	g.s = g.maxStatus(StatusSynSent, g.s)
+	for {
+		if g.syn1RetryTime >= syn1RetryTime {
+			log.Println("GConn#dial : syn1 fail , retry time is :" + fmt.Sprint(g.syn1RetryTime))
+			g.Close()
+			return errors.New("syn1 fail , retry time is :" + fmt.Sprint(g.syn1RetryTime))
+		}
+		select {
+		case <-g.syn1Finish:
+			return
+		case <-time.After(time.Duration(syn1Timeout) * time.Millisecond): // wait ack timeout
+			err = g.sendMessage(m1)
+			if err != nil {
+				log.Println("GConn#dial sendMessage2 err , err is", err)
+			}
+			g.syn1RetryTime++
+		}
+	}
+}
+
+// close
 func (g *GConn) close() (err error) {
-	if g.s != StatusEstablished {
-		return errors.New("status is not right")
+	if g.s > StatusEstablished { //closing
+		return
+	}
+	select {
+	case <-g.closeSignal:
+	default:
+		close(g.closeSignal)
+	}
+	if g.s < StatusEstablished { // syncing
+		g.sendWin.Close()
+		g.recvWin.Close()
+		g.UDPConn.Close()
+		g.s = StatusClosed
+		return
 	}
 	g.sendWin.Close()
 	m := &v1.Message{}
@@ -225,5 +271,12 @@ func (g *GConn) close() (err error) {
 	}
 	g.s = StatusFinWait1
 	<-g.closeFinish
-	return nil
+	return g.UDPConn.Close()
+}
+
+func (g *GConn) maxStatus(s1, s2 Status) (ms Status) {
+	if s1 > s2 {
+		return s1
+	}
+	return s2
 }
