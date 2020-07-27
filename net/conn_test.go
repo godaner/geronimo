@@ -115,7 +115,7 @@ func s() {
 
 	//conn.Write(b)
 	conn.Close()
-
+	fmt.Println("s , status",conn.Status())
 	end := time.Now()
 
 	fmt.Println(end.Unix() - begin.Unix())
@@ -238,4 +238,38 @@ func TestGConn_Close(t *testing.T) {
 		}
 	}()
 	time.Sleep(1000 * time.Second)
+}
+
+func TestGConn_Close2(t *testing.T) {
+	go func() {
+		time.Sleep(2 * time.Second)
+		l, err := Listen(&GAddr{
+			IP:   "192.168.6.6",
+			Port: 3333,
+		})
+		if err != nil {
+			panic(err)
+		}
+		c2, err := l.Accept()
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(c2)
+		bs:=make([]byte,15,15)
+		n,err:=c2.Read(bs)
+		fmt.Println(n,err,bs)
+	}()
+	c1, err := Dial(&GAddr{
+		IP:   "192.168.6.6",
+		Port: 3333,
+	})
+	n,err:=c1.Write([]byte("ccccccccccccccc"))
+	fmt.Println("w n",n)
+	if err!=nil{
+		fmt.Println("w err",err)
+	}
+	err=c1.Close()
+	fmt.Println(c1, err)
+
+	time.Sleep(1000*time.Second)
 }

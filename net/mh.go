@@ -70,6 +70,7 @@ func (g *GConn) syn2MessageHandler(m *v1.Message) {
 	case g.syn1Finish <- true:
 	default:
 		log.Println("GConn#syn2MessageHandler : 3 there are no syn1Finish suber")
+		return
 	}
 	g.s = g.maxStatus(StatusEstablished, g.s)
 }
@@ -88,6 +89,7 @@ func (g *GConn) syn3MessageHandler(m *v1.Message) {
 	case g.syn2Finish <- true:
 	default:
 		log.Println("GConn#syn3MessageHandler : there are no syn2Finish suber")
+		return
 	}
 	g.s = StatusEstablished
 	g.lis.acceptResult <- &acceptRes{c: g, err: nil}
@@ -95,35 +97,59 @@ func (g *GConn) syn3MessageHandler(m *v1.Message) {
 
 // fin1MessageHandler
 func (g *GConn) fin1MessageHandler(m *v1.Message) {
-	g.fin1SeqU = m.SeqN()
-	if g.fin1SeqV == 0 {
-		g.fin1SeqV = uint32(rand.Int31n(2<<16 - 2))
+	g.finSeqU = m.SeqN()
+	if g.finSeqV == 0 {
+		g.finSeqV = uint32(rand.Int31n(2<<16 - 2))
 	}
-	m.FIN2(g.fin1SeqV, g.fin1SeqU+1)
+	m.FIN2(g.finSeqV, g.finSeqU+1)
 	err := g.sendMessage(m)
 	if err != nil {
-		log.Println("GConn#fin1MessageHandler : handleMessage ACKN StatusCloseWait err", err)
+		log.Println("GConn#fin1MessageHandler : sendMessage1 err", err)
 	}
 	g.s = StatusCloseWait
 	go func() {
 		g.sendWin.Close()
-		if g.fin2SeqW == 0 {
-			g.fin2SeqW = uint32(rand.Int31n(2<<16 - 2))
+		if g.finSeqW == 0 {
+			g.finSeqW = uint32(rand.Int31n(2<<16 - 2))
 		}
-		m.FIN3(g.fin2SeqW, g.fin1SeqU+1)
+		//fmt.Printf("fin1 %v,%p\n",g.finSeqW,g)
+		m.FIN3(g.finSeqW, g.finSeqU+1)
 		err := g.sendMessage(m)
 		if err != nil {
-			log.Println("GConn#fin1MessageHandler : handleMessage ACKN StatusLastAck err", err)
+			log.Println("GConn#fin1MessageHandler : sendMessage2 err", err)
 		}
 		g.s = StatusLastAck
+		for {
+			if g.fin3RetryTime >= fin3RetryTime {
+				log.Println("GConn#fin1MessageHandler : fin3 fail , retry time is :" + fmt.Sprint(g.fin3RetryTime))
+				// todo
+				return
+			}
+			select {
+			case <-g.fin3Finish:
+				return
+			case <-time.After(time.Duration(fin3Timeout) * time.Millisecond): // wait ack timeout
+				err = g.sendMessage(m)
+				if err != nil {
+					log.Println("GConn#fin1MessageHandler sendMessage3 err , err is", err)
+				}
+				g.fin3RetryTime++
+			}
+		}
 	}()
 }
 
 // fin2MessageHandler
 func (g *GConn) fin2MessageHandler(m *v1.Message) {
-	g.fin1SeqV = m.SeqN()
-	if m.AckN()-1 != g.fin1SeqU {
-		log.Println("GConn#fin2MessageHandler : ack != sed u", m.AckN()-1, g.fin1SeqU)
+	g.finSeqV = m.SeqN()
+	if m.AckN()-1 != g.finSeqU {
+		log.Println("GConn#fin2MessageHandler : ack != sed u", m.AckN()-1, g.finSeqU)
+		return
+	}
+	select {
+	case g.fin1Finish <- true:
+	default:
+		log.Println("GConn#fin2MessageHandler : there are no fin1Finish suber")
 		return
 	}
 	g.s = StatusFinWait2
@@ -131,21 +157,28 @@ func (g *GConn) fin2MessageHandler(m *v1.Message) {
 
 // fin3MessageHandler
 func (g *GConn) fin3MessageHandler(m *v1.Message) {
-	g.fin2SeqW = m.SeqN()
-	if m.AckN()-1 != g.fin1SeqU {
-		log.Println("GConn#fin3MessageHandler : ack != seq u", m.AckN()-1, g.fin1SeqU)
+	g.finSeqW = m.SeqN()
+	if m.AckN()-1 != g.finSeqU {
+		log.Println("GConn#fin3MessageHandler : ack != seq u", m.AckN()-1, g.finSeqU)
 		return
 	}
-	m.FIN4(g.fin1SeqU+1, g.fin2SeqW+1)
+	m.FIN4(g.finSeqU+1, g.finSeqW+1)
 	err := g.sendMessage(m)
 	if err != nil {
 		log.Println("GConn#fin3MessageHandler : send message err", err)
 	}
 	g.s = StatusTimeWait
 	go func() {
-		g.closeFinish <- true
-		<-time.After(time.Duration(2*msl) * time.Second)
 		g.recvWin.Close()
+		<-time.After(time.Duration(2*msl) * time.Second)
+		if g.f == FDial {
+			g.UDPConn.Close()
+		}
+		select {
+		case <-g.closeCtrlSignal:
+		default:
+			close(g.closeCtrlSignal)
+		}
 		g.rmFromLis()
 		g.s = StatusClosed
 	}()
@@ -153,13 +186,28 @@ func (g *GConn) fin3MessageHandler(m *v1.Message) {
 
 // fin4MessageHandler
 func (g *GConn) fin4MessageHandler(m *v1.Message) {
-	if m.AckN()-1 != g.fin2SeqW {
-		log.Println("GConn#fin4MessageHandler : ack != seq w", m.AckN()-1, g.fin2SeqW)
+	//fmt.Printf("fin4 %v,%p\n",g.finSeqW,g)
+	if m.AckN()-1 != g.finSeqW {
+		log.Println("GConn#fin4MessageHandler : ack != seq w", m.AckN()-1, g.finSeqW)
 		return
 	}
-	if m.SeqN()-1 != g.fin1SeqU {
-		log.Println("GConn#fin4MessageHandler : seq != seq u", m.SeqN()-1, g.fin1SeqU)
+	if m.SeqN()-1 != g.finSeqU {
+		log.Println("GConn#fin4MessageHandler : seq != seq u", m.SeqN()-1, g.finSeqU)
 		return
+	}
+	select {
+	case g.fin3Finish <- true:
+	default:
+		log.Println("GConn#fin4MessageHandler : there are no fin3Finish suber")
+		return
+	}
+	if g.f == FDial {
+		g.UDPConn.Close()
+	}
+	select {
+	case <-g.closeCtrlSignal:
+	default:
+		close(g.closeCtrlSignal)
 	}
 	g.rmFromLis()
 	g.recvWin.Close()

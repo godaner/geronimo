@@ -16,10 +16,14 @@ import (
 
 const (
 	udpmss        = 1472
-	syn1Timeout   = 2000
-	syn2Timeout   = 2000
-	syn1RetryTime = 4
-	syn2RetryTime = 4
+	syn1Timeout   = 500
+	syn2Timeout   = 500
+	fin1Timeout   = 500
+	fin3Timeout   = 500
+	syn1RetryTime = 10
+	syn2RetryTime = 10
+	fin1RetryTime = 10
+	fin3RetryTime = 10
 )
 const (
 	_                 = iota
@@ -51,27 +55,27 @@ func (s Status) String() string {
 type GConn struct {
 	sync.Once
 	*net.UDPConn
-	f                                              uint8
-	s                                              Status
-	recvWin                                        *v12.RWND
-	sendWin                                        *v12.SWND
-	raddr                                          *GAddr
-	laddr                                          *GAddr
-	lis                                            *GListener
-	synSeqX, synSeqY, fin1SeqU, fin1SeqV, fin2SeqW uint32
-	syn1RetryTime, syn2RetryTime                   uint8
-	syn1Finish, syn2Finish                         chan bool
-	closeFinish                                    chan bool
-	mhs                                            map[uint16]messageHandler
-	closeSignal                                    chan bool
+	f                                                          uint8
+	s                                                          Status
+	recvWin                                                    *v12.RWND
+	sendWin                                                    *v12.SWND
+	raddr                                                      *GAddr
+	laddr                                                      *GAddr
+	lis                                                        *GListener
+	synSeqX, synSeqY, finSeqU, finSeqV, finSeqW                uint32
+	syn1RetryTime, syn2RetryTime, fin1RetryTime, fin3RetryTime uint8
+	syn1Finish, syn2Finish, fin1Finish, fin3Finish             chan bool
+	mhs                                                        map[uint16]messageHandler
+	closeCtrlSignal                                            chan bool //control segment controller
 }
 
 func (g *GConn) init() {
 	g.Do(func() {
 		g.syn1Finish = make(chan bool)
 		g.syn2Finish = make(chan bool)
-		g.closeFinish = make(chan bool)
-		g.closeSignal = make(chan bool)
+		g.fin1Finish = make(chan bool)
+		g.fin3Finish = make(chan bool)
+		g.closeCtrlSignal = make(chan bool)
 		// init message handlers
 		g.mhs = map[uint16]messageHandler{
 			// syn
@@ -109,7 +113,7 @@ func (g *GConn) init() {
 				bs := make([]byte, udpmss, udpmss)
 				for {
 					select {
-					case <-g.closeSignal:
+					case <-g.closeCtrlSignal:
 						return
 					default:
 						func() {
@@ -246,13 +250,9 @@ func (g *GConn) dial() (err error) {
 
 // close
 func (g *GConn) close() (err error) {
+	//fmt.Printf("close %v,%p\n",g.finSeqW,g)
 	if g.s > StatusEstablished { //closing
 		return
-	}
-	select {
-	case <-g.closeSignal:
-	default:
-		close(g.closeSignal)
 	}
 	if g.s < StatusEstablished { // syncing
 		g.sendWin.Close()
@@ -263,15 +263,32 @@ func (g *GConn) close() (err error) {
 	}
 	g.sendWin.Close()
 	m := &v1.Message{}
-	g.fin1SeqU = uint32(rand.Int31n(2<<16 - 2))
-	m.FIN1(g.fin1SeqU)
+	if g.finSeqU == 0 {
+		g.finSeqU = uint32(rand.Int31n(2<<16 - 2))
+	}
+	m.FIN1(g.finSeqU)
 	err = g.sendMessage(m)
 	if err != nil {
-		return err
+		log.Println("GConn#close sendMessage1 err , err is", err)
 	}
 	g.s = StatusFinWait1
-	<-g.closeFinish
-	return g.UDPConn.Close()
+	for {
+		if g.fin1RetryTime >= fin1RetryTime {
+			log.Println("GConn#close : fin1 fail , retry time is :" + fmt.Sprint(g.fin1RetryTime))
+			// todo
+			return errors.New("fin1 fail , retry time is :" + fmt.Sprint(g.fin1RetryTime))
+		}
+		select {
+		case <-g.fin1Finish:
+			return
+		case <-time.After(time.Duration(fin1Timeout) * time.Millisecond): // wait ack timeout
+			err = g.sendMessage(m)
+			if err != nil {
+				log.Println("GConn#close sendMessage2 err , err is", err)
+			}
+			g.fin1RetryTime++
+		}
+	}
 }
 
 func (g *GConn) maxStatus(s1, s2 Status) (ms Status) {
