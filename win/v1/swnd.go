@@ -38,7 +38,8 @@ const (
 )
 
 var (
-	ErrSWNDClosed = errors.New("swnd closed")
+	ErrSWNDClosed       = errors.New("swnd closed")
+	ErrSWNDCloseTimeout = errors.New("swnd close timeout")
 )
 
 type SegmentSender func(seq uint32, bs []byte) (err error)
@@ -65,6 +66,7 @@ type SWND struct {
 	rttd, rtts, rto    float64              // ns
 	closeSignal        chan bool
 	sendFinish         chan bool
+	forceClose         bool
 }
 
 // Write
@@ -450,19 +452,21 @@ func (s *SWND) loopFlush() {
 		for {
 			select {
 			case <-s.closeSignal:
-				// send all
-				for {
-					<-time.After(10 * time.Millisecond)
-					if s.readySend.Len() <= 0 {
-						break
+				if !s.forceClose{
+					// send all
+					for {
+						<-time.After(10 * time.Millisecond)
+						if s.readySend.Len() <= 0 {
+							break
+						}
+						s.send(false) // clear data
 					}
-					s.send(false) // clear data
-				}
-				// recv all ack
-				for {
-					<-time.After(10 * time.Millisecond)
-					if s.sentC <= 0 {
-						break
+					// recv all ack
+					for {
+						<-time.After(10 * time.Millisecond)
+						if s.sentC <= 0 {
+							break
+						}
 					}
 				}
 				close(s.sendFinish)
@@ -474,13 +478,20 @@ func (s *SWND) loopFlush() {
 	}()
 }
 
-func (s *SWND) Close() (err error) {
+func (s *SWND) Close(force bool) (err error) {
 	s.init()
 	select {
 	case <-s.closeSignal:
 	default:
+		s.forceClose = force
 		close(s.closeSignal)
-		<-s.sendFinish
+		select {
+		case <-s.sendFinish:
+		case <-time.After(time.Duration(5) * time.Second):
+			return ErrSWNDCloseTimeout
+		}
+
 	}
+
 	return nil
 }

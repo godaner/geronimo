@@ -284,8 +284,6 @@ func TestGListener_Accept(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-
-
 		i:=10
 		for ; ;  {
 			c1, err := l.Accept()
@@ -313,7 +311,8 @@ func TestGListener_Accept(t *testing.T) {
 		bs:=make([]byte,2,2)
 		n,err=c2.Read(bs)
 		fmt.Println("c2 r",n,err,string(bs))
-		//err=c1.Close()
+		err=c2.Close()
+		fmt.Println("c2 c",err,c2.Status())
 	}()
 	go func() {
 		c3, err := Dial(&GAddr{
@@ -325,7 +324,8 @@ func TestGListener_Accept(t *testing.T) {
 		bs:=make([]byte,2,2)
 		n,err=c3.Read(bs)
 		fmt.Println("c3 r",n,err,string(bs))
-		//err=c1.Close()
+		err=c3.Close()
+		fmt.Println("c3 c",err,c3.Status())
 	}()
 	time.Sleep(1000*time.Second)
 }

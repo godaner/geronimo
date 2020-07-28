@@ -1,31 +1,24 @@
 package v2
 
 import (
-	"errors"
+	"log"
 	"net"
-	"time"
 )
 
 const (
 	dialRetryTime     = 4
-	dialRetryInterval = 2000
+	dialRetryInterval = 1000
 )
 
 func Dial(raddr *GAddr) (c *GConn, err error) {
 	var conn *net.UDPConn
-	err = errors.New("try dial")
-	ret := 0
-	for {
-		if err == nil {
-			break
-		}
-		if ret >= dialRetryTime {
-			return nil, errors.New("dial err")
-		}
-		conn, err = net.DialUDP("udp", nil, raddr.toUDPAddr())
-		ret++
-		time.After(time.Duration(dialRetryInterval) * time.Microsecond)
+	conn, err = net.DialUDP("udp", nil, raddr.toUDPAddr())
+	if err!=nil{
+		log.Println("Dial : udp dial err",err)
+		return nil,err
 	}
+
+	log.Println("Dial : udp dial success , , local addr is ",conn.LocalAddr().String(),", remote addr is",conn.RemoteAddr().String())
 	gc := &GConn{
 		UDPConn: conn,
 		laddr:   fromUDPAddr(conn.LocalAddr().(*net.UDPAddr)),
