@@ -12,6 +12,10 @@ const (
 	//defSize = 1<<32 - 1
 )
 
+var (
+	ErrStoped = errors.New("stoped")
+)
+
 type ByteBlockChan struct {
 	len  int64
 	c    chan byte
@@ -46,6 +50,18 @@ func (b *ByteBlockChan) Pop() (usable bool, byt byte, len uint32) {
 		return
 	}
 }
+func (b *ByteBlockChan) PopWithStop(stop chan bool) (usable bool, byt byte, len uint32, err error) {
+	b.init()
+	select {
+	case byt = <-b.c:
+		atomic.AddInt64(&b.len, -1)
+		return true, byt, uint32(b.len), nil
+	case <-stop:
+		return usable, byt, len, ErrStoped
+	default:
+		return
+	}
+}
 
 // BlockPop
 func (b *ByteBlockChan) BlockPop() (byt byte, len uint32) {
@@ -60,7 +76,7 @@ func (b *ByteBlockChan) BlockPopWithStop(stop chan bool) (byt byte, len uint32, 
 	b.init()
 	select {
 	case <-stop:
-		return 0, 0, errors.New("stop err")
+		return 0, 0, ErrStoped
 	case byt = <-b.c:
 		atomic.AddInt64(&b.len, -1)
 		return byt, uint32(b.len), nil

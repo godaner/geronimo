@@ -68,7 +68,11 @@ func (g *GListener) init() {
 						}
 						g.gcs.Store(rAddr.String(), gc)
 					}
-					gc.handleMessage(m1)
+					err = gc.handleMessage(m1)
+					if err != nil {
+						log.Println("GListener#init : handleMessage err", err)
+						return
+					}
 				}()
 			}
 		}()

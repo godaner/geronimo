@@ -37,6 +37,10 @@ const (
 	max_rto = float64(100 * 1e6) // ns
 )
 
+var (
+	ErrSWNDClosed = errors.New("swnd closed")
+)
+
 type SegmentSender func(seq uint32, bs []byte) (err error)
 
 type SWND struct {
@@ -61,7 +65,6 @@ type SWND struct {
 	rttd, rtts, rto    float64              // ns
 	closeSignal        chan bool
 	sendFinish         chan bool
-	//closeFinish        chan bool
 }
 
 // Write
@@ -69,8 +72,8 @@ func (s *SWND) Write(bs []byte) (err error) {
 	s.init()
 	select {
 	case <-s.closeSignal:
-		log.Println("SWND : window is closeSignal")
-		return errors.New("closeSignal")
+		log.Println("SWND : window is closed")
+		return ErrSWNDClosed
 	default:
 	}
 	s.readySend.BlockPushs(bs...)
@@ -79,8 +82,14 @@ func (s *SWND) Write(bs []byte) (err error) {
 }
 
 // RecvAckSegment
-func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) {
+func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) (err error) {
 	s.init()
+	select {
+	case <-s.closeSignal:
+		return ErrSWNDClosed
+	default:
+
+	}
 	//s.recvWinSize = rule.DefRecWinSize // todo
 	//s.comSendWinSize()
 	//s.recvWinSize = int64(s.sendAbleNum(winSize, ack)) + s.sentC
@@ -98,7 +107,7 @@ func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) {
 		return
 	}
 	s.quickResendSegment(ack)
-
+	return nil
 }
 
 // comSendWinSize
@@ -440,12 +449,20 @@ func (s *SWND) loopFlush() {
 		for {
 			select {
 			case <-s.closeSignal:
+				// send all
 				for {
 					<-time.After(10 * time.Millisecond)
 					if s.readySend.Len() <= 0 {
 						break
 					}
 					s.send(false) // clear data
+				}
+				// recv all ack
+				for {
+					<-time.After(10 * time.Millisecond)
+					if s.sentC <= 0 {
+						break
+					}
 				}
 				close(s.sendFinish)
 				return

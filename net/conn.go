@@ -124,7 +124,11 @@ func (g *GConn) init() {
 							}
 							m := &v1.Message{}
 							m.UnMarshall(bs[:n])
-							g.handleMessage(m)
+							err = g.handleMessage(m)
+							if err != nil {
+								log.Println("GConn#init : handleMessage err", err)
+								return
+							}
 						}()
 					}
 
@@ -137,12 +141,11 @@ func (g *GConn) init() {
 }
 
 // handleMessage
-func (g *GConn) handleMessage(m *v1.Message) {
+func (g *GConn) handleMessage(m *v1.Message) (err error) {
 	g.init()
 	mh, ok := g.mhs[m.Flag()]
 	if ok && mh != nil {
-		mh(m)
-		return
+		return mh(m)
 	}
 	log.Println("GConn#handleMessage : no message handler be found , conn status is", g.s, ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
 	panic("no handler")
@@ -164,12 +167,19 @@ func (g *GConn) sendMessage(m *v1.Message) (err error) {
 	return nil
 }
 
-// rmFromLis
-func (g *GConn) rmFromLis() {
-	if g.lis == nil {
-		return
+// stopUDPConn
+func (g *GConn) stopUDPConn() {
+	if g.f == FDial {
+		select {
+		case <-g.closeCtrlSignal:
+		default:
+			close(g.closeCtrlSignal)
+		}
+		g.UDPConn.Close()
 	}
-	g.lis.gcs.Delete(g.raddr.toUDPAddr().String())
+	if g.f == FListen {
+		g.lis.gcs.Delete(g.raddr.toUDPAddr().String())
+	}
 }
 func (g *GConn) Read(b []byte) (n int, err error) {
 	g.init()
@@ -250,17 +260,17 @@ func (g *GConn) dial() (err error) {
 
 // close
 func (g *GConn) close() (err error) {
-	//fmt.Printf("close %v,%p\n",g.finSeqW,g)
-	if g.s > StatusEstablished { //closing
-		return
-	}
-	if g.s < StatusEstablished { // syncing
-		g.sendWin.Close()
-		g.recvWin.Close()
-		g.UDPConn.Close()
-		g.s = StatusClosed
-		return
-	}
+	////fmt.Printf("close %v,%p\n",g.finSeqW,g)
+	//if g.s > StatusEstablished { //closing
+	//	return
+	//}
+	//if g.s < StatusEstablished { // syncing
+	//	g.sendWin.Close()
+	//	g.recvWin.Close()
+	//	g.UDPConn.Close()
+	//	g.s = StatusClosed
+	//	return
+	//}
 	g.sendWin.Close()
 	m := &v1.Message{}
 	if g.finSeqU == 0 {

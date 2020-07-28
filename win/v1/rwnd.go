@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"errors"
 	"fmt"
 	"github.com/godaner/geronimo/rule"
 	"github.com/godaner/geronimo/win/ds"
@@ -24,6 +25,10 @@ import (
 // index =   0       1       2      3       4       5       6       7        8         9         10
 const (
 	checkWinInterval = 10
+)
+
+var (
+	ErrRWNDClosed = errors.New("rwnd closed")
 )
 
 type AckSender func(ack uint32, receiveWinSize uint16) (err error)
@@ -81,7 +86,10 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 	}
 	n = 1
 	for i := 1; i < len(bs); i++ {
-		usable, b, _ := r.recved.Pop()
+		usable, b, _, err := r.recved.PopWithStop(r.closeSignal)
+		if err != nil {
+			return 0, io.EOF
+		}
 		if !usable {
 			break
 		}
@@ -93,12 +101,12 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 }
 
 // RecvSegment
-func (r *RWND) RecvSegment(seqN uint32, bs []byte) {
+func (r *RWND) RecvSegment(seqN uint32, bs []byte) (err error) {
 	r.init()
 	select {
 	case <-r.closeSignal:
 		log.Println("RWND : window is closeSignal")
-		return
+		return ErrRWNDClosed
 	default:
 	}
 	r.Lock()
