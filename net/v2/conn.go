@@ -1,4 +1,4 @@
-package net
+package v2
 
 import (
 	"errors"
@@ -46,6 +46,10 @@ const (
 )
 const msl = 60 * 2
 
+var (
+	ErrStatusErr = errors.New("status err")
+)
+
 type Status uint16
 
 func (s Status) String() string {
@@ -81,12 +85,9 @@ func (g *GConn) init() {
 			// syn
 			rule.FlagSYN1: g.syn1MessageHandler,
 			rule.FlagSYN2: g.syn2MessageHandler,
-			rule.FlagSYN3: g.syn3MessageHandler,
 			// fin
 			rule.FlagFIN1: g.fin1MessageHandler,
 			rule.FlagFIN2: g.fin2MessageHandler,
-			rule.FlagFIN3: g.fin3MessageHandler,
-			rule.FlagFIN4: g.fin4MessageHandler,
 			// body
 			rule.FlagPAYLOAD: g.payloadMessageHandler,
 			// ack
@@ -147,7 +148,7 @@ func (g *GConn) handleMessage(m *v1.Message) (err error) {
 	if ok && mh != nil {
 		return mh(m)
 	}
-	log.Println("GConn#handleMessage : no message handler be found , conn status is", g.s, ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
+	log.Println("GConn#handleMessage : no message handler be found , flag is",m.Flag(),", conn status is", g.s, ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
 	panic("no handler")
 }
 
@@ -238,11 +239,19 @@ func (g *GConn) dial() (err error) {
 	if err != nil {
 		log.Println("GConn#dial sendMessage1 err , err is", err)
 	}
-	g.s = g.maxStatus(StatusSynSent, g.s)
+	g.s = StatusSynSent
 	for {
 		if g.syn1RetryTime >= syn1RetryTime {
 			log.Println("GConn#dial : syn1 fail , retry time is :" + fmt.Sprint(g.syn1RetryTime))
-			g.Close()
+			err = g.sendWin.Close()
+			if err != nil {
+				log.Println("GConn#dial : syn1 fail , close send win err", err)
+			}
+			err = g.recvWin.Close()
+			if err != nil {
+				log.Println("GConn#dial : syn1 fail , close recv win err", err)
+			}
+			g.closeUDPConn()
 			return errors.New("syn1 fail , retry time is :" + fmt.Sprint(g.syn1RetryTime))
 		}
 		select {
@@ -260,17 +269,9 @@ func (g *GConn) dial() (err error) {
 
 // close
 func (g *GConn) close() (err error) {
-	////fmt.Printf("close %v,%p\n",g.finSeqW,g)
-	//if g.s > StatusEstablished { //closing
-	//	return
-	//}
-	//if g.s < StatusEstablished { // syncing
-	//	g.sendWin.Close()
-	//	g.recvWin.Close()
-	//	g.UDPConn.Close()
-	//	g.s = StatusClosed
-	//	return
-	//}
+	if g.s != StatusEstablished {
+		return ErrStatusErr
+	}
 	g.sendWin.Close()
 	m := &v1.Message{}
 	if g.finSeqU == 0 {

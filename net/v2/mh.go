@@ -1,4 +1,4 @@
-package net
+package v2
 
 import (
 	"fmt"
@@ -59,43 +59,16 @@ func (g *GConn) syn2MessageHandler(m *v1.Message) (err error) {
 		log.Println("GConn#syn2MessageHandler : syncack seq x != ack")
 		return
 	}
-	m1 := &v1.Message{}
-	m1.SYN3(g.synSeqX+1, g.synSeqY+1)
-	err = g.sendMessage(m1)
-	if err != nil {
-		log.Println("GConn#syn2MessageHandler : Write err", err)
-		return
-	}
 	select {
 	case g.syn1Finish <- true:
 	default:
 		log.Println("GConn#syn2MessageHandler : there are no syn1Finish suber")
 		return
 	}
-	g.s = g.maxStatus(StatusEstablished, g.s)
+	g.s = StatusEstablished
 	return nil
 }
 
-// syn3MessageHandler
-func (g *GConn) syn3MessageHandler(m *v1.Message) (err error) {
-	if g.synSeqX+1 != m.SeqN() {
-		log.Println("GConn#syn3MessageHandler : seq x != m.seq")
-		return
-	}
-	if g.synSeqY+1 != m.AckN() {
-		log.Println("GConn#syn3MessageHandler : seq y != m.ack")
-		return
-	}
-	select {
-	case g.syn2Finish <- true:
-	default:
-		log.Println("GConn#syn3MessageHandler : there are no syn2Finish suber")
-		return
-	}
-	g.s = StatusEstablished
-	g.lis.acceptResult <- &acceptRes{c: g, err: nil}
-	return nil
-}
 
 // fin1MessageHandler
 func (g *GConn) fin1MessageHandler(m *v1.Message) (err error) {
