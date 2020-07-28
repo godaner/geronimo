@@ -273,3 +273,59 @@ func TestGConn_Close2(t *testing.T) {
 
 	time.Sleep(1000*time.Second)
 }
+func TestGListener_Accept(t *testing.T) {
+	s1:="s1"
+	s2:="s2"
+	go func() {
+		l, err := Listen(&GAddr{
+			IP:   "192.168.6.6",
+			Port: 3333,
+		})
+		if err != nil {
+			panic(err)
+		}
+
+
+		i:=10
+		for ; ;  {
+			c1, err := l.Accept()
+			if err != nil {
+				panic(err)
+			}
+			go func(i int) {
+				bs:=make([]byte,2,2)
+				n,err:=c1.Read(bs)
+				fmt.Println("c"+fmt.Sprint(i)+" r",n,err,string(bs))
+				n,err=c1.Write([]byte(s2))
+				fmt.Println("c"+fmt.Sprint(i)+" w",n,err)
+			}(i)
+			i++
+		}
+
+	}()
+	go func() {
+		c2, err := Dial(&GAddr{
+			IP:   "192.168.6.6",
+			Port: 3333,
+		})
+		n,err:=c2.Write([]byte(s1))
+		fmt.Println("c2 w",n,err)
+		bs:=make([]byte,2,2)
+		n,err=c2.Read(bs)
+		fmt.Println("c2 r",n,err,string(bs))
+		//err=c1.Close()
+	}()
+	go func() {
+		c3, err := Dial(&GAddr{
+			IP:   "192.168.6.6",
+			Port: 3333,
+		})
+		n,err:=c3.Write([]byte(s1))
+		fmt.Println("c3 w",n,err)
+		bs:=make([]byte,2,2)
+		n,err=c3.Read(bs)
+		fmt.Println("c3 r",n,err,string(bs))
+		//err=c1.Close()
+	}()
+	time.Sleep(1000*time.Second)
+}

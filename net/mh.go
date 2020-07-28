@@ -69,7 +69,7 @@ func (g *GConn) syn2MessageHandler(m *v1.Message) (err error) {
 	select {
 	case g.syn1Finish <- true:
 	default:
-		log.Println("GConn#syn2MessageHandler : 3 there are no syn1Finish suber")
+		log.Println("GConn#syn2MessageHandler : there are no syn1Finish suber")
 		return
 	}
 	g.s = g.maxStatus(StatusEstablished, g.s)
@@ -175,7 +175,7 @@ func (g *GConn) fin3MessageHandler(m *v1.Message) (err error) {
 	g.s = StatusTimeWait
 	go func() {
 		<-time.After(time.Duration(2*msl) * time.Second)
-		g.stopUDPConn()
+		g.closeUDPConn()
 		g.s = StatusClosed
 	}()
 	return nil
@@ -199,7 +199,7 @@ func (g *GConn) fin4MessageHandler(m *v1.Message) (err error) {
 		return
 	}
 	g.recvWin.Close()
-	g.stopUDPConn()
+	g.closeUDPConn()
 	g.s = StatusClosed
 	return nil
 }

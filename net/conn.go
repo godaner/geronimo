@@ -167,8 +167,8 @@ func (g *GConn) sendMessage(m *v1.Message) (err error) {
 	return nil
 }
 
-// stopUDPConn
-func (g *GConn) stopUDPConn() {
+// closeUDPConn
+func (g *GConn) closeUDPConn() {
 	if g.f == FDial {
 		select {
 		case <-g.closeCtrlSignal:

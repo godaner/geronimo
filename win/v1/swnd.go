@@ -84,12 +84,12 @@ func (s *SWND) Write(bs []byte) (err error) {
 // RecvAckSegment
 func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) (err error) {
 	s.init()
-	select {
-	case <-s.closeSignal:
-		return ErrSWNDClosed
-	default:
-
-	}
+	//select {
+	//case <-s.closeSignal:
+	//	return ErrSWNDClosed
+	//default:
+	//
+	//}
 	//s.recvWinSize = rule.DefRecWinSize // todo
 	//s.comSendWinSize()
 	//s.recvWinSize = int64(s.sendAbleNum(winSize, ack)) + s.sentC
@@ -137,7 +137,7 @@ func (s *SWND) init() {
 		s.closeSignal = make(chan bool)
 		s.closeSignal = make(chan bool)
 		s.sendFinish = make(chan bool)
-		s.loopPrint()
+		//s.loopPrint()
 		s.loopFlush()
 	})
 }
@@ -289,12 +289,13 @@ func (s *SWND) readASegment(checkMSS bool) (bs []byte) {
 	return bs
 }
 
-func (s *SWND) sendCallBack(tag string, seq uint32, bs []byte) {
+func (s *SWND) sendCallBack(tag string, seq uint32, bs []byte) (err error) {
 	log.Println("SWND : send , tag is", tag, ", seq is [", seq, "] , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
-	err := s.SegmentSender(seq, bs)
+	err = s.SegmentSender(seq, bs)
 	if err != nil {
 		log.Println("SWND : send , tag is", tag, ", err , err is", err.Error())
 	}
+	return err
 }
 
 // incSeq

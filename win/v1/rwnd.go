@@ -142,7 +142,7 @@ func (r *RWND) init() {
 		r.readyRecv = &sync.Map{}
 		r.closeSignal = make(chan bool)
 		//r.loopAckWin()
-		r.loopPrint()
+		//r.loopPrint()
 	})
 }
 
