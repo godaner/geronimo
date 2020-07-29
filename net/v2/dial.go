@@ -5,10 +5,6 @@ import (
 	"net"
 )
 
-const (
-	dialRetryTime     = 4
-	dialRetryInterval = 1000
-)
 
 func Dial(raddr *GAddr) (c *GConn, err error) {
 	var conn *net.UDPConn
@@ -18,7 +14,7 @@ func Dial(raddr *GAddr) (c *GConn, err error) {
 		return nil,err
 	}
 
-	log.Println("Dial : udp dial success , , local addr is ",conn.LocalAddr().String(),", remote addr is",conn.RemoteAddr().String())
+	//log.Println("Dial : udp dial success , , local addr is ",conn.LocalAddr().String(),", remote addr is",conn.RemoteAddr().String())
 	gc := &GConn{
 		UDPConn: conn,
 		laddr:   fromUDPAddr(conn.LocalAddr().(*net.UDPAddr)),

@@ -263,6 +263,7 @@ func TestGConn_Close2(t *testing.T) {
 		IP:   "192.168.6.6",
 		Port: 3333,
 	})
+	fmt.Println("w dial",c1,err)
 	n,err:=c1.Write([]byte("ccccccccccccccc"))
 	fmt.Println("w n",n)
 	if err!=nil{

@@ -50,8 +50,6 @@ func (g *GConn) syn2MessageHandler(m *v1.Message) (err error) {
 		log.Println("GConn#syn2MessageHandler : there are no syn1Finish suber")
 		return
 	}
-	g.initWin()
-	g.s = StatusEstablished
 	return nil
 }
 
@@ -61,8 +59,7 @@ func (g *GConn) fin1MessageHandler(m *v1.Message) (err error) {
 	if g.finSeqV == 0 {
 		g.finSeqV = uint32(rand.Int31n(2<<16 - 2))
 	}
-	g.closeSendWin()
-	g.closeRecvWin()
+	g.closeWin()
 	m.FIN2(g.finSeqV, g.finSeqU+1)
 	err = g.sendMessage(m)
 	if err != nil {
@@ -86,9 +83,6 @@ func (g *GConn) fin2MessageHandler(m *v1.Message) (err error) {
 		log.Println("GConn#fin2MessageHandler : there are no fin1Finish suber")
 		return
 	}
-	g.recvWin.Close()
-	g.closeUDPConn()
-	g.s = StatusClosed
 	return nil
 }
 

@@ -68,6 +68,7 @@ func (g *GListener) init() {
 						}
 						g.gcs.Store(rAddr.String(), gc)
 					}
+					log.Println("GListener#init : recv msg from",rAddr.String(), ", msg flag is ",m1.Flag())
 					err = gc.handleMessage(m1)
 					if err != nil {
 						log.Println("GListener#init : handleMessage err", err)
