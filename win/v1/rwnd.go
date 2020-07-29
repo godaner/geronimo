@@ -3,10 +3,11 @@ package v1
 import (
 	"errors"
 	"fmt"
+	"github.com/godaner/geronimo/logger"
+	gologging "github.com/godaner/geronimo/logger/go-logging"
 	"github.com/godaner/geronimo/rule"
 	"github.com/godaner/geronimo/win/ds"
 	"io"
-	"log"
 	"sync"
 	"time"
 )
@@ -45,6 +46,7 @@ type RWND struct {
 	tailSeq     uint32    // current tail seq , location is tail
 	ackWin      bool
 	closeSignal chan bool
+	logger logger.Logger
 }
 
 // rData
@@ -95,7 +97,7 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 		}
 		bs[i] = b
 		n++
-		//log.Println("RWND : read , win size is", r.getRecvWinSize(), ", char is", string(b))
+		//r.logger.Debug("RWND : read , win size is", r.getRecvWinSize(), ", char is", string(b))
 	}
 	return n, nil
 }
@@ -105,13 +107,13 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) (err error) {
 	r.init()
 	select {
 	case <-r.closeSignal:
-		log.Println("RWND : window is closeSignal")
+		r.logger.Warning("RWND : window is closeSignal")
 		return ErrRWNDClosed
 	default:
 	}
 	r.Lock()
 	defer r.Unlock()
-	log.Println("RWND : recv seq is [", seqN, "]")
+	r.logger.Debug("RWND : recv seq is [", seqN, "]")
 	if !r.inRecvSeqRange(seqN) {
 		ackN := seqN
 		r.incSeq(&ackN, uint16(len(bs)))
@@ -136,6 +138,7 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) (err error) {
 
 func (r *RWND) init() {
 	r.Do(func() {
+		r.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "RWND", &r), logger.DEBUG)
 		r.recvWinSize = int32(rule.DefRecWinSize)
 		r.tailSeq = rule.MinSeqN
 		r.recved = &ds.ByteBlockChan{Size: 0}
@@ -180,14 +183,14 @@ func (r *RWND) ack(tag string, ackN *uint32) {
 		ackN = &a
 	}
 	rws := r.getRecvWinSize()
-	log.Println("RWND : tag is ", tag, "rwnd is", &r, " , send ack , ack is [", *ackN, "] , win size is", rws)
+	r.logger.Debug("RWND : tag is ", tag, "rwnd is", &r, " , send ack , ack is [", *ackN, "] , win size is", rws)
 	if rws <= 0 {
-		log.Println("RWND : tag is ", tag, ", set ackWin")
+		r.logger.Warning("RWND : tag is ", tag, ", set ackWin")
 		r.ackWin = true
 	}
 	err := r.AckSender(*ackN, rws)
 	if err != nil {
-		log.Println("RWND : tag is ", tag, ", ack callback err , err is", err.Error())
+		r.logger.Error("RWND : tag is ", tag, ", ack callback err , err is", err.Error())
 	}
 }
 
@@ -221,8 +224,8 @@ func (r *RWND) loopPrint() {
 			case <-r.closeSignal:
 				return
 			default:
-				log.Println("RWND : print , recved len is", r.recved.Len(), ", recv win size is", r.getRecvWinSize(), ", ackWin is", r.ackWin)
-				//log.Println("RWND : recv win size is", r.recvWinSize())
+				r.logger.Notice("RWND : print , recved len is", r.recved.Len(), ", recv win size is", r.getRecvWinSize(), ", ackWin is", r.ackWin)
+				//r.logger.Debug("RWND : recv win size is", r.recvWinSize())
 				time.Sleep(1000 * time.Millisecond)
 			}
 
@@ -242,7 +245,7 @@ func (r *RWND) loopAckWin() {
 			case <-t.C:
 				rws := r.getRecvWinSize()
 				if r.ackWin && rws > 0 {
-					log.Println("RWND : ack win , recv size is", rws)
+					r.logger.Notice("RWND : ack win , recv size is", rws)
 					r.ackWin = false
 					r.ack("3", nil)
 				}

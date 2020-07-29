@@ -2,8 +2,10 @@ package v2
 
 import (
 	"errors"
+	"fmt"
+	"github.com/godaner/geronimo/logger"
+	gologging "github.com/godaner/geronimo/logger/go-logging"
 	v1 "github.com/godaner/geronimo/rule/v1"
-	"log"
 	"net"
 	"sync"
 )
@@ -11,7 +13,7 @@ import (
 func Listen(addr *GAddr) (l net.Listener, err error) {
 	c, err := net.ListenUDP("udp", addr.toUDPAddr())
 	if err != nil {
-		log.Println("Listen : ListenUDP err", err)
+		panic(err)
 		return nil, err
 	}
 	return &GListener{
@@ -27,6 +29,7 @@ type GListener struct {
 	gcs          *sync.Map //map[string]*GConn
 	acceptResult chan *acceptRes
 	closeSignal  chan bool
+	logger       logger.Logger
 }
 type acceptRes struct {
 	c   net.Conn
@@ -35,6 +38,7 @@ type acceptRes struct {
 
 func (g *GListener) init() {
 	g.Do(func() {
+		g.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "GListener", &g), logger.DEBUG)
 		g.acceptResult = make(chan *acceptRes)
 		g.closeSignal = make(chan bool)
 		g.gcs = &sync.Map{} //map[string]*GConn{}
@@ -49,7 +53,7 @@ func (g *GListener) init() {
 				func() {
 					n, rAddr, err := g.c.ReadFromUDP(bs)
 					if err != nil {
-						log.Println("GListener : ReadFromUDP err", err)
+						g.logger.Error("GListener : ReadFromUDP err", err)
 						return
 					}
 					m1 := &v1.Message{}
@@ -68,10 +72,10 @@ func (g *GListener) init() {
 						}
 						g.gcs.Store(rAddr.String(), gc)
 					}
-					log.Println("GListener#init : recv msg from",rAddr.String(), ", msg flag is ",m1.Flag())
+					g.logger.Debug("GListener#init : recv msg from", rAddr.String(), ", msg flag is ", m1.Flag())
 					err = gc.handleMessage(m1)
 					if err != nil {
-						log.Println("GListener#init : handleMessage err", err)
+						g.logger.Error("GListener#init : handleMessage err", err)
 						return
 					}
 				}()

@@ -3,21 +3,12 @@ package v2
 import (
 	"github.com/godaner/geronimo/rule"
 	v1 "github.com/godaner/geronimo/rule/v1"
-	"log"
 	"math/rand"
 )
 
 type messageHandler func(m *v1.Message) (err error)
 
-// payloadMessageHandler
-func (g *GConn) payloadMessageHandler(m *v1.Message) (err error) {
-	log.Println("GConn#payloadMessageHandler : status is",g.s)
-	if g.recvWin==nil{
-		log.Println("GConn#payloadMessageHandler : recvWin is nil")
-		return
-	}
-	return g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
-}
+
 
 // syn1MessageHandler
 func (g *GConn) syn1MessageHandler(m *v1.Message) (err error) {
@@ -30,7 +21,7 @@ func (g *GConn) syn1MessageHandler(m *v1.Message) (err error) {
 	m1.SYN2(g.synSeqY, g.synSeqX+1)
 	err = g.sendMessage(m1)
 	if err != nil {
-		log.Println("GConn#syn1MessageHandler : sendMessage1 err", err)
+		g.logger.Error("GConn#syn1MessageHandler : sendMessage1 err", err)
 	}
 	g.s = StatusEstablished
 	g.lis.acceptResult <- &acceptRes{c: g, err: nil}
@@ -41,13 +32,13 @@ func (g *GConn) syn1MessageHandler(m *v1.Message) (err error) {
 func (g *GConn) syn2MessageHandler(m *v1.Message) (err error) {
 	g.synSeqY = m.SeqN()
 	if g.synSeqX+1 != m.AckN() {
-		log.Println("GConn#syn2MessageHandler : syncack seq x != ack")
+		g.logger.Error("GConn#syn2MessageHandler : syncack seq x != ack")
 		return
 	}
 	select {
 	case g.syn1Finish <- true:
 	default:
-		log.Println("GConn#syn2MessageHandler : there are no syn1Finish suber")
+		g.logger.Warning("GConn#syn2MessageHandler : there are no syn1Finish suber")
 		return
 	}
 	return nil
@@ -63,7 +54,7 @@ func (g *GConn) fin1MessageHandler(m *v1.Message) (err error) {
 	m.FIN2(g.finSeqV, g.finSeqU+1)
 	err = g.sendMessage(m)
 	if err != nil {
-		log.Println("GConn#fin1MessageHandler : sendMessage1 err", err)
+		g.logger.Error("GConn#fin1MessageHandler : sendMessage1 err", err)
 	}
 	g.closeUDPConn()
 	g.s = StatusClosed
@@ -74,13 +65,13 @@ func (g *GConn) fin1MessageHandler(m *v1.Message) (err error) {
 func (g *GConn) fin2MessageHandler(m *v1.Message) (err error) {
 	g.finSeqV = m.SeqN()
 	if m.AckN()-1 != g.finSeqU {
-		log.Println("GConn#fin2MessageHandler : ack != sed u", m.AckN()-1, g.finSeqU)
+		g.logger.Error("GConn#fin2MessageHandler : ack != sed u", m.AckN()-1, g.finSeqU)
 		return
 	}
 	select {
 	case g.fin1Finish <- true:
 	default:
-		log.Println("GConn#fin2MessageHandler : there are no fin1Finish suber")
+		g.logger.Warning("GConn#fin2MessageHandler : there are no fin1Finish suber")
 		return
 	}
 	return nil
@@ -88,10 +79,20 @@ func (g *GConn) fin2MessageHandler(m *v1.Message) (err error) {
 
 // ackMessageHandler
 func (g *GConn) ackMessageHandler(m *v1.Message) (err error) {
-	log.Println("GConn＃ackMessageHandler : status is",g.s)
+	g.logger.Debug("GConn＃ackMessageHandler : status is",g.s)
 	if g.sendWin==nil{
-		log.Println("GConn＃ackMessageHandler : sendWin is nil")
+		g.logger.Warning("GConn＃ackMessageHandler : sendWin is nil")
 		return
 	}
 	return g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
+}
+
+// payloadMessageHandler
+func (g *GConn) payloadMessageHandler(m *v1.Message) (err error) {
+	g.logger.Debug("GConn#payloadMessageHandler : status is",g.s)
+	if g.recvWin==nil{
+		g.logger.Warning("GConn#payloadMessageHandler : recvWin is nil")
+		return
+	}
+	return g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
 }

@@ -3,10 +3,11 @@ package v2
 import (
 	"errors"
 	"fmt"
+	"github.com/godaner/geronimo/logger"
+	gologging "github.com/godaner/geronimo/logger/go-logging"
 	"github.com/godaner/geronimo/rule"
 	v1 "github.com/godaner/geronimo/rule/v1"
 	v12 "github.com/godaner/geronimo/win/v1"
-	"log"
 	"math/rand"
 	"net"
 	"strconv"
@@ -75,10 +76,12 @@ type GConn struct {
 	syn1Finish, syn2Finish, fin1Finish, fin3Finish             chan bool
 	mhs                                                        map[uint16]messageHandler
 	fDialCloseUDPSignal, fListenCloseUDPSignal                 chan bool
+	logger                                                     logger.Logger
 }
 
 func (g *GConn) init() {
 	g.initOnce.Do(func() {
+		g.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "GConn", &g), logger.DEBUG)
 		g.syn1Finish = make(chan bool)
 		g.syn2Finish = make(chan bool)
 		g.fin1Finish = make(chan bool)
@@ -117,7 +120,7 @@ func (g *GConn) initLoopFDialReadUDP() {
 						//func() {
 						n, err := g.UDPConn.Read(bs)
 						if err != nil {
-							log.Println("GConn#init : Read err", err)
+							g.logger.Error("GConn#init : Read err", err)
 							// just for fdial
 							g.closeUDPConn()
 							g.closeSendWin()
@@ -129,7 +132,7 @@ func (g *GConn) initLoopFDialReadUDP() {
 						m.UnMarshall(bs[:n])
 						err = g.handleMessage(m)
 						if err != nil {
-							log.Println("GConn#init : handleMessage err", err)
+							g.logger.Error("GConn#init : handleMessage err", err)
 							continue
 						}
 						//}()
@@ -184,7 +187,7 @@ func (g *GConn) handleMessage(m *v1.Message) (err error) {
 	if ok && mh != nil {
 		return mh(m)
 	}
-	log.Println("GConn#handleMessage : no message handler be found , flag is", m.Flag(), ", conn status is", g.s, ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
+	g.logger.Debug("GConn#handleMessage : no message handler be found , flag is", m.Flag(), ", conn status is", g.s, ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
 	panic("no handler")
 }
 
@@ -194,7 +197,7 @@ func (g *GConn) sendMessage(m *v1.Message) (err error) {
 	if g.f == FDial {
 		_, err = g.UDPConn.Write(b)
 		if err != nil {
-			log.Println("GConn : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String(), " err", err)
+			g.logger.Error("GConn : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String(), " err", err)
 			g.closeUDPConn()
 		}
 		return err
@@ -202,7 +205,7 @@ func (g *GConn) sendMessage(m *v1.Message) (err error) {
 	if g.f == FListen {
 		_, err = g.UDPConn.WriteToUDP(b, g.raddr.toUDPAddr())
 		if err != nil {
-			log.Println("GConn : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String(), " err", err)
+			g.logger.Error("GConn : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String(), " err", err)
 			g.closeUDPConn() // todo ?????
 		}
 		return err
@@ -292,6 +295,7 @@ func (g *GConn) closeWin() (err error) {
 }
 func (g *GConn) dial() (err error) {
 	g.init()
+	g.logger.Debug("GConn#dial dial start")
 	g.initLoopFDialReadUDP()
 	// sync req
 	m1 := &v1.Message{}
@@ -301,12 +305,12 @@ func (g *GConn) dial() (err error) {
 	m1.SYN1(g.synSeqX)
 	err = g.sendMessage(m1)
 	if err != nil {
-		log.Println("GConn#dial sendMessage1 err , err is", err)
+		g.logger.Error("GConn#dial sendMessage1 err , err is", err)
 	}
 	g.s = StatusSynSent
 	for {
 		if g.syn1RetryTime >= syn1RetryTime {
-			log.Println("GConn#dial : syn1 fail , retry time is :" + fmt.Sprint(g.syn1RetryTime))
+			g.logger.Debug("GConn#dial : syn1 fail , retry time is :" + fmt.Sprint(g.syn1RetryTime))
 			g.closeUDPConn()
 			//return errors.New("syn1 fail , retry time is :" + fmt.Sprint(g.syn1RetryTime))
 			return ErrDialTimeout
@@ -315,16 +319,16 @@ func (g *GConn) dial() (err error) {
 		case <-g.syn1Finish:
 			g.initWin()
 			g.s = StatusEstablished
-			log.Println("GConn#dial : success")
+			g.logger.Notice("GConn#dial : success")
 			return nil
 		case <-g.fDialCloseUDPSignal:
-			log.Println("GConn#dial : udp conn is closed")
+			g.logger.Warning("GConn#dial : udp conn is closed")
 			g.s = StatusClosed
 			return ErrDialBasicConnClosed
 		case <-time.After(time.Duration(syn1Timeout) * time.Millisecond): // wait ack timeout
 			err = g.sendMessage(m1)
 			if err != nil {
-				log.Println("GConn#dial sendMessage2 err , err is", err)
+				g.logger.Error("GConn#dial sendMessage2 err , err is", err)
 				continue
 			}
 			g.syn1RetryTime++
@@ -335,7 +339,7 @@ func (g *GConn) dial() (err error) {
 // close
 // fdial or flisten
 func (g *GConn) close() (err error) {
-	log.Println("GConn#close : start , status is", g.s)
+	g.logger.Debug("GConn#close : start , status is", g.s)
 	if g.s != StatusEstablished {
 		return ErrConnStatus
 	}
@@ -347,12 +351,12 @@ func (g *GConn) close() (err error) {
 	m.FIN1(g.finSeqU)
 	err = g.sendMessage(m)
 	if err != nil {
-		log.Println("GConn#close sendMessage1 err , err is", err)
+		g.logger.Error("GConn#close sendMessage1 err , err is", err)
 	}
 	g.s = StatusFinWait1
 	for {
 		if g.fin1RetryTime >= fin1RetryTime {
-			log.Println("GConn#close : fin1 fail , retry time is :" + fmt.Sprint(g.fin1RetryTime))
+			g.logger.Debug("GConn#close : fin1 fail , retry time is :" + fmt.Sprint(g.fin1RetryTime))
 			g.closeRecvWin()
 			g.closeUDPConn()
 			g.s = StatusClosed
@@ -364,25 +368,25 @@ func (g *GConn) close() (err error) {
 			g.closeRecvWin()
 			g.closeUDPConn()
 			g.s = StatusClosed
-			log.Println("GConn#close : success")
+			g.logger.Debug("GConn#close : success")
 			return nil
 		case <-g.fDialCloseUDPSignal:
 			// for fdial
-			log.Println("GConn#close : fdial udp conn is closed")
+			g.logger.Warning("GConn#close : fdial udp conn is closed")
 			g.closeRecvWin()
 			g.s = StatusClosed
 			return ErrDialBasicConnClosed
 		case <-g.fListenCloseUDPSignal:
 			// for flisten
-			log.Println("GConn#close : fdial udp conn is closed")
+			g.logger.Warning("GConn#close : fdial udp conn is closed")
 			g.closeRecvWin()
 			g.s = StatusClosed
-			log.Println("GConn#close : flisten udp conn is closed")
+			g.logger.Warning("GConn#close : flisten udp conn is closed")
 			return ErrDialBasicConnClosed
 		case <-time.After(time.Duration(fin1Timeout) * time.Millisecond): // wait ack timeout
 			err = g.sendMessage(m)
 			if err != nil {
-				log.Println("GConn#close sendMessage2 err , err is", err)
+				g.logger.Error("GConn#close sendMessage2 err , err is", err)
 				continue
 			}
 			g.fin1RetryTime++

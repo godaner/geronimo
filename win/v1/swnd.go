@@ -3,9 +3,10 @@ package v1
 import (
 	"errors"
 	"fmt"
+	"github.com/godaner/geronimo/logger"
+	gologging "github.com/godaner/geronimo/logger/go-logging"
 	"github.com/godaner/geronimo/rule"
 	"github.com/godaner/geronimo/win/ds"
-	"log"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -66,6 +67,7 @@ type SWND struct {
 	rttd, rtts, rto    float64              // ns
 	closeSignal        chan bool
 	sendFinish         chan bool
+	logger         logger.Logger
 }
 
 // Write
@@ -73,7 +75,7 @@ func (s *SWND) Write(bs []byte) (err error) {
 	s.init()
 	select {
 	case <-s.closeSignal:
-		log.Println("SWND : window is closed")
+		s.logger.Warning("SWND : window is closed")
 		return ErrSWNDClosed
 	default:
 	}
@@ -100,7 +102,7 @@ func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) (err error) {
 		s.trimAck()
 		err = s.send(true)
 	}()
-	log.Println("SWND : recv ack is [", ack, "] , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize)
+	s.logger.Debug("SWND : recv ack is [", ack, "] , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize)
 	// recv 0-3 => ack = 4
 	m := s.ack(ack)
 	if m {
@@ -117,6 +119,7 @@ func (s *SWND) comSendWinSize() {
 
 func (s *SWND) init() {
 	s.Do(func() {
+		s.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "SWND", &s), logger.DEBUG)
 		s.ssthresh = rule.DefSsthresh
 		s.recvWinSize = rule.DefRecWinSize
 		s.congWinSize = rule.DefCongWinSize
@@ -145,7 +148,7 @@ func (s *SWND) trimAck() {
 	s.Lock()
 	defer func() {
 		s.Unlock()
-		log.Println("SWND : trimAck , sent len is", s.sentC)
+		s.logger.Debug("SWND : trimAck , sent len is", s.sentC)
 	}()
 	for {
 		_, ok := s.ackSeqCache.Load(s.headSeq)
@@ -220,7 +223,7 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 	}
 
 	rttms := time.Now().UnixNano() // ms
-	log.Println("SWND : set resend progress success , seq is", seq)
+	s.logger.Debug("SWND : set resend progress success , seq is", seq)
 	go func() {
 		defer func() {
 			rttme := time.Now().UnixNano() - rttms
@@ -235,7 +238,7 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 			}
 			s.comSendWinSize()
 			s.comRTO(float64(rttme))
-			log.Println("SWND : rttm is", rttme, ", readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
+			s.logger.Debug("SWND : rttm is", rttme, ", readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
 			t.Stop()
 			s.resetQuickResendAckNum(seq)
 			s.segResendCancel.Delete(seq)
@@ -254,7 +257,7 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 				s.incRTO()
 				err := s.sendCallBack("2", seq, bs)
 				if err != nil {
-					log.Println("SWND : 1 resend get send err", err)
+					s.logger.Error("SWND : 1 resend get send err", err)
 					return
 				}
 				s.resetQuickResendAckNum(seq)
@@ -266,7 +269,7 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 				s.comSendWinSize()
 				err := s.sendCallBack("3", seq, bs)
 				if err != nil {
-					log.Println("SWND : 2 resend get send err", err)
+					s.logger.Error("SWND : 2 resend get send err", err)
 					return
 				}
 				s.resetQuickResendAckNum(seq)
@@ -301,10 +304,10 @@ func (s *SWND) readASegment(checkMSS bool) (bs []byte) {
 }
 
 func (s *SWND) sendCallBack(tag string, seq uint32, bs []byte) (err error) {
-	log.Println("SWND : send , swnd is", &s, " , tag is", tag, ", seq is [", seq, "] , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
+	s.logger.Debug("SWND : send , swnd is", &s, " , tag is", tag, ", seq is [", seq, "] , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
 	err = s.SegmentSender(seq, bs)
 	if err != nil {
-		log.Println("SWND : send , tag is", tag, ", err , err is", err.Error())
+		s.logger.Error("SWND : send , tag is", tag, ", err , err is", err.Error())
 	}
 	return err
 }
@@ -355,22 +358,22 @@ func (s *SWND) quickResendSegment(ack uint32) (match bool) {
 	numI, ok := s.quickResendAckNum.Load(ack)
 	num, _ := numI.(*uint8)
 	if !ok {
-		log.Println("SWND : first trigger quick resend , ack is", ack)
+		s.logger.Debug("SWND : first trigger quick resend , ack is", ack)
 		num = &zero
 		//s.quickResendAckNum[ack] = num
 		s.quickResendAckNum.Store(ack, num)
 	}
 	*num++
 	if *num < quickResendIfAckGEN {
-		log.Println("SWND : com quick resend ack num , ack is", ack, ", num is", *num)
+		s.logger.Debug("SWND : com quick resend ack num , ack is", ack, ", num is", *num)
 		return false
 	}
-	log.Println("SWND : com quick resend ack num , ack is", ack, ", num is", *num)
+	s.logger.Debug("SWND : com quick resend ack num , ack is", ack, ", num is", *num)
 	cii, ok := s.segResendQuick.Load(ack)
 	//ci, ok := s.segResendQuick[ack]
 	if !ok { // not data wait to send
 		*num = 0
-		log.Println("SWND : no resend to be find , maybe recv ack before , ack is", ack)
+		s.logger.Debug("SWND : no resend to be find , maybe recv ack before , ack is", ack)
 		return false
 	}
 	ci := cii.(chan bool)
@@ -379,17 +382,17 @@ func (s *SWND) quickResendSegment(ack uint32) (match bool) {
 
 	select {
 	case ci <- true:
-		log.Println("SWND : find quick resend , ack is", ack)
+		s.logger.Debug("SWND : find quick resend , ack is", ack)
 		select {
 		case <-r:
-			log.Println("SWND : quick resend ack is", ack)
+			s.logger.Debug("SWND : quick resend ack is", ack)
 		case <-time.After(1000 * time.Millisecond):
-			log.Println("SWND : quick resend timeout , ack is", ack)
+			s.logger.Error("SWND : quick resend timeout , ack is", ack)
 			panic("quick resend timeout , ack is " + fmt.Sprint(ack))
 
 		}
 	case <-time.After(100 * time.Millisecond):
-		log.Println("SWND : no resend imm be found , ack is", ack)
+		s.logger.Error("SWND : no resend imm be found , ack is", ack)
 	}
 	return true
 }
@@ -411,7 +414,7 @@ func (s *SWND) ack(ack uint32) (match bool) {
 	//ci, ok := s.segResendCancel[ack]
 	cii, ok := s.segResendCancel.Load(ack)
 	if !ok {
-		log.Println("SWND : no be ack find , decack is", ack)
+		s.logger.Warning("SWND : no be ack find , decack is", ack)
 		return false
 	}
 	ci := cii.(chan bool)
@@ -421,17 +424,17 @@ func (s *SWND) ack(ack uint32) (match bool) {
 
 	select {
 	case ci <- true:
-		log.Println("SWND : find resend cancel , origin ack is", originAck)
+		s.logger.Debug("SWND : find resend cancel , origin ack is", originAck)
 		select {
 		case <-r:
-			log.Println("SWND : cancel resend finish , origin ack is", originAck, ", rto is", int64(s.rto))
+			s.logger.Debug("SWND : cancel resend finish , origin ack is", originAck, ", rto is", int64(s.rto))
 			return true
 		case <-time.After(1000 * time.Millisecond):
-			log.Println("SWND : cancel resend timeout , origin ack is", originAck)
+			s.logger.Error("SWND : cancel resend timeout , origin ack is", originAck)
 			panic("cancel resend timeout , origin ack is " + fmt.Sprint(originAck))
 		}
 		//case <-time.After(100 * time.Millisecond):
-		//	log.Println("SWND : no resend cancel be found , origin ack is", originAck)
+		//	s.logger.Debug("SWND : no resend cancel be found , origin ack is", originAck)
 		//	return
 	}
 	return true
@@ -445,7 +448,7 @@ func (s *SWND) loopPrint() {
 			case <-s.closeSignal:
 				return
 			default:
-				log.Println("SWND : print , sent len is ", s.sentC, ", readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", recv win size is", s.recvWinSize, ", cong win size is", s.congWinSize, ", rto is", int64(s.rto))
+				s.logger.Notice("SWND : print , sent len is ", s.sentC, ", readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", recv win size is", s.recvWinSize, ", cong win size is", s.congWinSize, ", rto is", int64(s.rto))
 				time.Sleep(1000 * time.Millisecond)
 			}
 
