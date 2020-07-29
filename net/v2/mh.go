@@ -61,12 +61,8 @@ func (g *GConn) fin1MessageHandler(m *v1.Message) (err error) {
 	if g.finSeqV == 0 {
 		g.finSeqV = uint32(rand.Int31n(2<<16 - 2))
 	}
-	if g.sendWin != nil {
-		g.sendWin.Close(false)
-	}
-	if g.recvWin != nil {
-		g.recvWin.Close()
-	}
+	g.closeSendWin()
+	g.closeRecvWin()
 	m.FIN2(g.finSeqV, g.finSeqU+1)
 	err = g.sendMessage(m)
 	if err != nil {

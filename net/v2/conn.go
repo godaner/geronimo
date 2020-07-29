@@ -16,14 +16,14 @@ import (
 
 const (
 	udpmss        = 1472
-	syn1Timeout   = 50
+	syn1Timeout   = 500
 	syn2Timeout   = 500
 	fin1Timeout   = 500
 	fin3Timeout   = 500
-	syn1RetryTime = 10
-	syn2RetryTime = 10
-	fin1RetryTime = 10
-	fin3RetryTime = 10
+	syn1RetryTime = 50
+	syn2RetryTime = 50
+	fin1RetryTime = 50
+	fin3RetryTime = 50
 )
 const (
 	_                 = iota
@@ -58,7 +58,7 @@ func (s Status) String() string {
 }
 
 type GConn struct {
-	sync.Once
+	initOnce, initSendWinOnce, initRecvWinOnce, initReadFDialUDPOnce sync.Once
 	*net.UDPConn
 	f                                                          uint8
 	s                                                          Status
@@ -72,11 +72,10 @@ type GConn struct {
 	syn1Finish, syn2Finish, fin1Finish, fin3Finish             chan bool
 	mhs                                                        map[uint16]messageHandler
 	stopReadFDialUDPSignal                                     chan bool
-	loopReadFDialUDPOnce                                       sync.Once
 }
 
 func (g *GConn) init() {
-	g.Do(func() {
+	g.initOnce.Do(func() {
 		g.syn1Finish = make(chan bool)
 		g.syn2Finish = make(chan bool)
 		g.fin1Finish = make(chan bool)
@@ -98,9 +97,10 @@ func (g *GConn) init() {
 
 	})
 }
+
 // initLoopFDialReadUDP
 func (g *GConn) initLoopFDialReadUDP() {
-	g.loopReadFDialUDPOnce.Do(func() {
+	g.initReadFDialUDPOnce.Do(func() {
 		if g.f == FDial {
 			go func() {
 				// recv udp
@@ -114,13 +114,10 @@ func (g *GConn) initLoopFDialReadUDP() {
 						n, err := g.UDPConn.Read(bs)
 						if err != nil {
 							log.Println("GConn#init : Read err", err)
-							g.UDPConn.Close() // todo need do this ??
-							if g.sendWin!=nil{
-								g.sendWin.Close(true)
-							}
-							if g.recvWin!=nil{
-								g.recvWin.Close()
-							}
+							g.closeUDPConn()
+							g.closeSendWin()
+							g.closeRecvWin()
+							g.s = StatusClosed
 							return
 						}
 						m := &v1.Message{}
@@ -150,25 +147,29 @@ func (g *GConn) initWin() {
 
 // initRecvWin
 func (g *GConn) initRecvWin() {
-	g.recvWin = &v12.RWND{
-		AckSender: func(ack uint32, receiveWinSize uint16) (err error) {
-			m := &v1.Message{}
-			m.ACK(ack, receiveWinSize)
-			return g.sendMessage(m)
-		},
-	}
+	g.initRecvWinOnce.Do(func() {
+		g.recvWin = &v12.RWND{
+			AckSender: func(ack uint32, receiveWinSize uint16) (err error) {
+				m := &v1.Message{}
+				m.ACK(ack, receiveWinSize)
+				return g.sendMessage(m)
+			},
+		}
+	})
 }
 
 // initSendWin
 func (g *GConn) initSendWin() {
-	g.sendWin = &v12.SWND{
-		SegmentSender: func(seq uint32, bs []byte) (err error) {
-			// send udp
-			m := &v1.Message{}
-			m.PAYLOAD(seq, bs)
-			return g.sendMessage(m)
-		},
-	}
+	g.initSendWinOnce.Do(func() {
+		g.sendWin = &v12.SWND{
+			SegmentSender: func(seq uint32, bs []byte) (err error) {
+				// send udp
+				m := &v1.Message{}
+				m.PAYLOAD(seq, bs)
+				return g.sendMessage(m)
+			},
+		}
+	})
 }
 
 // handleMessage
@@ -187,12 +188,16 @@ func (g *GConn) sendMessage(m *v1.Message) (err error) {
 	b := m.Marshall()
 	if g.f == FDial {
 		_, err = g.UDPConn.Write(b)
-		//log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String())
+		if err != nil {
+			log.Println("GConn : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String(), " err", err)
+		}
 		return err
 	}
 	if g.f == FListen {
 		_, err = g.UDPConn.WriteToUDP(b, g.raddr.toUDPAddr())
-		//log.Println("GConn : udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String())
+		if err != nil {
+			log.Println("GConn : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String(), " err", err)
+		}
 		return err
 	}
 	return nil
@@ -259,7 +264,18 @@ func (g *GConn) Status() (s Status) {
 	g.init()
 	return g.s
 }
-
+func (g *GConn) closeRecvWin() (err error) {
+	if g.recvWin == nil {
+		return
+	}
+	return g.recvWin.Close()
+}
+func (g *GConn) closeSendWin() (err error) {
+	if g.sendWin == nil {
+		return
+	}
+	return g.sendWin.Close()
+}
 func (g *GConn) dial() (err error) {
 	g.init()
 	g.initLoopFDialReadUDP()
@@ -284,7 +300,7 @@ func (g *GConn) dial() (err error) {
 		}
 		select {
 		case <-g.syn1Finish:
-			log.Println("GConn#dial : dial success")
+			log.Println("GConn#dial : success")
 			return
 		case <-time.After(time.Duration(syn1Timeout) * time.Millisecond): // wait ack timeout
 			err = g.sendMessage(m1)
@@ -300,11 +316,11 @@ func (g *GConn) dial() (err error) {
 
 // close
 func (g *GConn) close() (err error) {
-	log.Println("GConn#close : start , status is",g.s)
+	log.Println("GConn#close : start , status is", g.s)
 	if g.s != StatusEstablished {
 		return ErrConnStatus
 	}
-	g.sendWin.Close(false)
+	g.sendWin.Close()
 	m := &v1.Message{}
 	if g.finSeqU == 0 {
 		g.finSeqU = uint32(rand.Int31n(2<<16 - 2))
@@ -318,20 +334,20 @@ func (g *GConn) close() (err error) {
 	for {
 		if g.fin1RetryTime >= fin1RetryTime {
 			log.Println("GConn#close : fin1 fail , retry time is :" + fmt.Sprint(g.fin1RetryTime))
-			g.sendWin.Close(true)
+			g.sendWin.Close()
 			g.recvWin.Close()
 			g.closeUDPConn()
 			return errors.New("fin1 fail , retry time is :" + fmt.Sprint(g.fin1RetryTime))
 		}
 		select {
 		case <-g.fin1Finish:
-			log.Println("GConn#close : finish")
+			log.Println("GConn#close : success")
 			return
 		case <-time.After(time.Duration(fin1Timeout) * time.Millisecond): // wait ack timeout
 			err = g.sendMessage(m)
 			if err != nil {
 				log.Println("GConn#close sendMessage2 err , err is", err)
-				g.sendWin.Close(true)
+				g.sendWin.Close()
 				g.recvWin.Close()
 				g.closeUDPConn()
 				return

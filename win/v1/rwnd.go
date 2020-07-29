@@ -180,7 +180,7 @@ func (r *RWND) ack(tag string, ackN *uint32) {
 		ackN = &a
 	}
 	rws := r.getRecvWinSize()
-	log.Println("RWND : tag is ", tag, ", send ack , ack is [", *ackN, "] , win size is", rws)
+	log.Println("RWND : tag is ", tag, "rwnd is", &r, " , send ack , ack is [", *ackN, "] , win size is", rws)
 	if rws <= 0 {
 		log.Println("RWND : tag is ", tag, ", set ackWin")
 		r.ackWin = true
