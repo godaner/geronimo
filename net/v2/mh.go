@@ -8,10 +8,9 @@ import (
 
 type messageHandler func(m *v1.Message) (err error)
 
-
-
 // syn1MessageHandler
 func (g *GConn) syn1MessageHandler(m *v1.Message) (err error) {
+	g.logger.Debug("GConn#syn1MessageHandler : start")
 	g.synSeqX = m.SeqN()
 	if g.synSeqY == 0 {
 		g.synSeqY = uint32(rand.Int31n(2<<16 - 2))
@@ -30,6 +29,7 @@ func (g *GConn) syn1MessageHandler(m *v1.Message) (err error) {
 
 // syn2MessageHandler
 func (g *GConn) syn2MessageHandler(m *v1.Message) (err error) {
+	g.logger.Debug("GConn#syn2MessageHandler : start")
 	g.synSeqY = m.SeqN()
 	if g.synSeqX+1 != m.AckN() {
 		g.logger.Error("GConn#syn2MessageHandler : syncack seq x != ack")
@@ -46,6 +46,7 @@ func (g *GConn) syn2MessageHandler(m *v1.Message) (err error) {
 
 // fin1MessageHandler
 func (g *GConn) fin1MessageHandler(m *v1.Message) (err error) {
+	g.logger.Debug("GConn#fin1MessageHandler : start")
 	g.finSeqU = m.SeqN()
 	if g.finSeqV == 0 {
 		g.finSeqV = uint32(rand.Int31n(2<<16 - 2))
@@ -63,6 +64,7 @@ func (g *GConn) fin1MessageHandler(m *v1.Message) (err error) {
 
 // fin2MessageHandler
 func (g *GConn) fin2MessageHandler(m *v1.Message) (err error) {
+	g.logger.Debug("GConn#fin2MessageHandler : start")
 	g.finSeqV = m.SeqN()
 	if m.AckN()-1 != g.finSeqU {
 		g.logger.Error("GConn#fin2MessageHandler : ack != sed u", m.AckN()-1, g.finSeqU)
@@ -79,8 +81,8 @@ func (g *GConn) fin2MessageHandler(m *v1.Message) (err error) {
 
 // ackMessageHandler
 func (g *GConn) ackMessageHandler(m *v1.Message) (err error) {
-	g.logger.Debug("GConn＃ackMessageHandler : status is",g.s)
-	if g.sendWin==nil{
+	g.logger.Debug("GConn#ackMessageHandler : start")
+	if g.sendWin == nil {
 		g.logger.Warning("GConn＃ackMessageHandler : sendWin is nil")
 		return
 	}
@@ -89,8 +91,8 @@ func (g *GConn) ackMessageHandler(m *v1.Message) (err error) {
 
 // payloadMessageHandler
 func (g *GConn) payloadMessageHandler(m *v1.Message) (err error) {
-	g.logger.Debug("GConn#payloadMessageHandler : status is",g.s)
-	if g.recvWin==nil{
+	g.logger.Debug("GConn#payloadMessageHandler : start")
+	if g.recvWin == nil {
 		g.logger.Warning("GConn#payloadMessageHandler : recvWin is nil")
 		return
 	}

@@ -1,19 +1,19 @@
 package rule
 
 const (
-	FlagSYN1    = 1 << iota
-	FlagSYN2
-	FlagSYN3
-	FlagFIN1
-	FlagFIN2
-	FlagFIN3
-	FlagFIN4
-	FlagACK
-	FlagPAYLOAD
+	FlagSYN1    = 1 << iota // 1
+	FlagSYN2                // 2
+	FlagSYN3                // 4
+	FlagFIN1                // 8
+	FlagFIN2                // 16
+	FlagFIN3                // 32
+	FlagFIN4                // 64
+	FlagACK                 // 128
+	FlagPAYLOAD             // 256
 )
 
 const (
-	_           = iota
+	_ = iota
 	AttrPAYLOAD
 )
 const (

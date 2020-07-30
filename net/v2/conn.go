@@ -191,7 +191,7 @@ func (g *GConn) handleMessage(m *v1.Message) (err error) {
 	if ok && mh != nil {
 		return mh(m)
 	}
-	g.logger.Debug("GConn#handleMessage : no message handler be found , flag is", m.Flag(), ", conn status is", g.s, ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
+	g.logger.Warning("GConn#handleMessage : no message handler be found , flag is", m.Flag(), ", conn status is", g.s, ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
 	panic("no handler")
 }
 
@@ -199,19 +199,19 @@ func (g *GConn) handleMessage(m *v1.Message) (err error) {
 func (g *GConn) sendMessage(m *v1.Message) (err error) {
 	b := m.Marshall()
 	if g.f == FDial {
-		g.logger.Error("GConn : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String())
+		g.logger.Debug("GConn : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String(), ", flag is", m.Flag())
 		_, err = g.UDPConn.Write(b)
 		if err != nil {
-			g.logger.Error("GConn : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String(), " err", err)
+			g.logger.Error("GConn : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String(), ", flag is", m.Flag(), " err", err)
 			g.closeUDPConn()
 		}
 		return err
 	}
 	if g.f == FListen {
-		g.logger.Error("GConn : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String())
+		g.logger.Debug("GConn : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String(), ", flag is", m.Flag())
 		_, err = g.UDPConn.WriteToUDP(b, g.raddr.toUDPAddr())
 		if err != nil {
-			g.logger.Error("GConn : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String(), " err", err)
+			g.logger.Error("GConn : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String(), ", flag is", m.Flag(), " err", err)
 			g.closeUDPConn() // todo ?????
 		}
 		return err
