@@ -81,7 +81,7 @@ type GConn struct {
 
 func (g *GConn) init() {
 	g.initOnce.Do(func() {
-		g.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "GConn", g.String()), nil)
+		g.logger = gologging.NewLogger(g.String(), nil)
 		g.syn1Finish = make(chan bool)
 		g.syn2Finish = make(chan bool)
 		g.fin1Finish = make(chan bool)
@@ -148,7 +148,7 @@ func (g *GConn) initLoopFDialReadUDP() {
 
 }
 func (g *GConn) String() string {
-	return fmt.Sprintf("p%v_l%v_r%v_s%v", &g, g.laddr.String(), g.raddr.String(), g.s)
+	return fmt.Sprintf("GConn:p%v,l%v,r%v,s%v", &g, g.laddr.String(), g.raddr.String(), g.s)
 }
 
 // initWin
@@ -161,6 +161,7 @@ func (g *GConn) initWin() {
 func (g *GConn) initRecvWin() {
 	g.initRecvWinOnce.Do(func() {
 		g.recvWin = &v12.RWND{
+			FTag:g.String(),
 			AckSender: func(ack uint32, receiveWinSize uint16) (err error) {
 				m := &v1.Message{}
 				m.ACK(ack, receiveWinSize)
@@ -174,6 +175,7 @@ func (g *GConn) initRecvWin() {
 func (g *GConn) initSendWin() {
 	g.initSendWinOnce.Do(func() {
 		g.sendWin = &v12.SWND{
+			FTag:g.String(),
 			SegmentSender: func(seq uint32, bs []byte) (err error) {
 				// send udp
 				m := &v1.Message{}
@@ -349,7 +351,7 @@ func (g *GConn) close() (err error) {
 	if g.s != StatusEstablished {
 		return ErrConnStatus
 	}
-	g.sendWin.Close()
+	g.closeSendWin()
 	m := &v1.Message{}
 	if g.finSeqU == 0 {
 		g.finSeqU = uint32(rand.Int31n(2<<16 - 2))

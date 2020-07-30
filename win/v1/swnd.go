@@ -26,16 +26,17 @@ import (
 //
 // index =         0       1       2      3       4       5       6       7        8       9       10
 const (
-	quickResendIfAckGEN    = 3
-	clearReadySendInterval = 100
+	quickResendIfAckGEN        = 3
+	clearReadySendInterval     = 100            //ms
+	clearReadySendLongInterval = 1000 * 60 * 60 //ms
 )
 const (
 	rtts_a  = float64(0.125)
 	rttd_b  = float64(0.25)
-	def_rto = float64(1000 * 1e6) // ns
-	def_rtt = float64(1000 * 1e6) // ns
-	min_rto = float64(1000)         // ns
-	max_rto = float64(1000 * 1e6) // ns
+	def_rto = float64(100 * 1e6) // ns
+	def_rtt = float64(100 * 1e6) // ns
+	min_rto = float64(100)       // ns
+	max_rto = float64(500 * 1e6) // ns
 )
 
 var (
@@ -67,7 +68,8 @@ type SWND struct {
 	rttd, rtts, rto    float64              // ns
 	closeSignal        chan bool
 	sendFinish         chan bool
-	logger         logger.Logger
+	logger             logger.Logger
+	FTag               string
 }
 
 // Write
@@ -116,10 +118,15 @@ func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) (err error) {
 func (s *SWND) comSendWinSize() {
 	s.sendWinSize = int64(math.Min(float64(s.recvWinSize), float64(s.congWinSize)))
 }
-
+func (s *SWND) String() string {
+	return fmt.Sprintf("SWND:%v->%v", &s, s.FTag)
+}
 func (s *SWND) init() {
 	s.Do(func() {
-		s.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "SWND", &s), nil)
+		if s.FTag == "" {
+			s.FTag = "nil"
+		}
+		s.logger = gologging.NewLogger(s.String(), nil)
 		s.ssthresh = rule.DefSsthresh
 		s.recvWinSize = rule.DefRecWinSize
 		s.congWinSize = rule.DefCongWinSize
@@ -191,9 +198,13 @@ func (s *SWND) send(checkMSS bool) (err error) {
 	for {
 		bs := s.readASegment(checkMSS)
 		if len(bs) <= 0 {
+			if s.readySend.Len() > 0 {
+				s.flushTimer.Reset(clearReadySendInterval) // flush after n ms
+			}
+			s.logger.Warning("SWND : read segment fail , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
 			return
 		}
-		s.flushTimer.Reset(clearReadySendInterval) // reset clear ready send timeout
+		s.flushTimer.Reset(clearReadySendLongInterval) // no flush
 		// add sent count
 		atomic.AddInt64(&s.sentC, 1)
 		// set segment timeout
@@ -304,7 +315,7 @@ func (s *SWND) readASegment(checkMSS bool) (bs []byte) {
 }
 
 func (s *SWND) sendCallBack(tag string, seq uint32, bs []byte) (err error) {
-	s.logger.Debug("SWND : send , swnd is", &s, " , tag is", tag, ", seq is [", seq, "] , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
+	s.logger.Debug("SWND : send , tag is", tag, ", seq is [", seq, "] , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
 	err = s.SegmentSender(seq, bs)
 	if err != nil {
 		s.logger.Error("SWND : send , tag is", tag, ", err , err is", err.Error())
@@ -460,19 +471,25 @@ func (s *SWND) loopPrint() {
 // loopFlush
 func (s *SWND) loopFlush() {
 	go func() {
-		defer s.flushTimer.Stop()
-		defer close(s.sendFinish)
+		defer func() {
+			s.flushTimer.Stop()
+			s.logger.Warning("SWND : loopFlush stop")
+			close(s.sendFinish)
+		}()
 		for {
 			select {
 			case <-s.closeSignal:
 				// send all
 				for {
 					<-time.After(10 * time.Millisecond)
+					s.logger.Debug("SWND : stopping flush 1, ready send is", s.readySend.Len())
 					if s.readySend.Len() <= 0 {
+						s.logger.Debug("SWND : stopping flush 1 finish , ready send is", s.readySend.Len())
 						break
 					}
 					err := s.send(false) // clear data
 					if err != nil {
+						s.logger.Error("SWND : stopping flush 1 err , ready send is", s.readySend.Len(), ", err is", err)
 						return
 					}
 
@@ -480,15 +497,19 @@ func (s *SWND) loopFlush() {
 				// recv all ack
 				for {
 					<-time.After(10 * time.Millisecond)
+					s.logger.Debug("SWND : stopping flush 2, sentC is", s.sentC)
 					if s.sentC <= 0 {
+						s.logger.Debug("SWND : stopping flush 2 finish , sentC is", s.sentC)
 						break
 					}
 				}
 				return
 			case <-s.flushTimer.C:
+				s.logger.Debug("SWND : flushing , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", recv win size is", s.recvWinSize, ", cong win size is", s.congWinSize, ", rto is", int64(s.rto))
 				err := s.send(false)
 				if err != nil {
-					return
+					s.logger.Debug("SWND : flushing err , err is", err)
+					continue
 				}
 			}
 		}

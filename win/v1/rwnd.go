@@ -46,7 +46,8 @@ type RWND struct {
 	tailSeq     uint32    // current tail seq , location is tail
 	ackWin      bool
 	closeSignal chan bool
-	logger logger.Logger
+	logger      logger.Logger
+	FTag        string
 }
 
 // rData
@@ -116,7 +117,7 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) (err error) {
 	r.logger.Debug("RWND : recv seq is [", seqN, "]")
 	if !r.inRecvSeqRange(seqN) {
 		ackN := seqN
-		r.incSeq(&ackN, uint16(len(bs)))
+		r.incSeq(&ackN, 1)
 		r.ack("4", &ackN)
 		return
 	}
@@ -135,10 +136,15 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) (err error) {
 	r.recv()
 	return
 }
-
+func (r *RWND) String() string {
+	return fmt.Sprintf("RWND:%v->%v", &r, r.FTag)
+}
 func (r *RWND) init() {
 	r.Do(func() {
-		r.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "RWND", &r), nil)
+		if r.FTag == "" {
+			r.FTag = "nil"
+		}
+		r.logger = gologging.NewLogger(r.String(), nil)
 		r.recvWinSize = int32(rule.DefRecWinSize)
 		r.tailSeq = rule.MinSeqN
 		r.recved = &ds.ByteBlockChan{Size: 0}
@@ -183,7 +189,7 @@ func (r *RWND) ack(tag string, ackN *uint32) {
 		ackN = &a
 	}
 	rws := r.getRecvWinSize()
-	r.logger.Debug("RWND : tag is ", tag, "rwnd is", &r, " , send ack , ack is [", *ackN, "] , win size is", rws)
+	r.logger.Debug("RWND : tag is ", tag, " , send ack , ack is [", *ackN, "] , win size is", rws)
 	if rws <= 0 {
 		r.logger.Warning("RWND : tag is ", tag, ", set ackWin")
 		r.ackWin = true

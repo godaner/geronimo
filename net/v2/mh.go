@@ -46,19 +46,22 @@ func (g *GConn) syn2MessageHandler(m *v1.Message) (err error) {
 
 // fin1MessageHandler
 func (g *GConn) fin1MessageHandler(m *v1.Message) (err error) {
-	g.logger.Debug("GConn#fin1MessageHandler : start")
-	g.finSeqU = m.SeqN()
-	if g.finSeqV == 0 {
-		g.finSeqV = uint32(rand.Int31n(2<<16 - 2))
-	}
-	g.closeWin()
-	m.FIN2(g.finSeqV, g.finSeqU+1)
-	err = g.sendMessage(m)
-	if err != nil {
-		g.logger.Error("GConn#fin1MessageHandler : sendMessage1 err", err)
-	}
-	g.closeUDPConn()
-	g.s = StatusClosed
+	go func() {
+		g.logger.Debug("GConn#fin1MessageHandler : start")
+		g.finSeqU = m.SeqN()
+		if g.finSeqV == 0 {
+			g.finSeqV = uint32(rand.Int31n(2<<16 - 2))
+		}
+		g.closeWin()
+		g.logger.Debug("GConn#fin1MessageHandler : close win finish")
+		m.FIN2(g.finSeqV, g.finSeqU+1)
+		err = g.sendMessage(m)
+		if err != nil {
+			g.logger.Error("GConn#fin1MessageHandler : sendMessage1 err", err)
+		}
+		g.closeUDPConn()
+		g.s = StatusClosed
+	}()
 	return nil
 }
 
