@@ -4,6 +4,7 @@ import (
 	"github.com/godaner/geronimo/logger"
 	logging "github.com/op/go-logging"
 	"os"
+	"strconv"
 )
 
 type Logger struct {
@@ -57,12 +58,16 @@ func (l *Logger) Errorf(fms string, arg ...interface{}) {
 func (l *Logger) Error(arg ...interface{}) {
 	l.logger.Error(arg...)
 }
-func NewLogger(module string, l logger.Level) logger.Logger {
+// NewLogger
+func NewLogger(module string, l *logger.Level) logger.Logger {
+	if l == nil {
+		l = getEnvLev()
+	}
 	logger, err := logging.GetLogger(module)
 	if err != nil {
 		panic(err)
 	}
-	if logger==nil{
+	if logger == nil {
 		panic("nil logger")
 	}
 	var format = logging.MustStringFormatter(
@@ -71,7 +76,15 @@ func NewLogger(module string, l logger.Level) logger.Logger {
 	backend := logging.NewLogBackend(os.Stdout, "", 0)
 	backendFormatter := logging.NewBackendFormatter(backend, format)
 	lvlBackend := logging.AddModuleLevel(backendFormatter)
-	lvlBackend.SetLevel(logging.Level(l), "")
+	lvlBackend.SetLevel(logging.Level(*l), "")
 	logger.SetBackend(lvlBackend)
 	return &Logger{logger: logger}
+}
+
+// getEnvLev
+func getEnvLev() *logger.Level {
+	ls := os.Getenv("LOG_LEV")
+	li64, _ := strconv.ParseInt(ls, 10, 64)
+	ll := logger.Level(li64)
+	return &ll
 }

@@ -2,19 +2,19 @@ package rule
 
 const (
 	FlagSYN1    = 1 << iota
-	FlagSYN2    = 1 << iota
-	FlagSYN3    = 1 << iota
-	FlagFIN1    = 1 << iota
-	FlagFIN2    = 1 << iota
-	FlagFIN3    = 1 << iota
-	FlagFIN4    = 1 << iota
-	FlagACK     = 1 << iota
-	FlagPAYLOAD = 1 << iota
+	FlagSYN2
+	FlagSYN3
+	FlagFIN1
+	FlagFIN2
+	FlagFIN3
+	FlagFIN4
+	FlagACK
+	FlagPAYLOAD
 )
 
 const (
 	_           = iota
-	AttrPAYLOAD = iota // payload
+	AttrPAYLOAD
 )
 const (
 	MaxSeqN = uint32(2 * DefRecWinSize)

@@ -27,23 +27,23 @@ const (
 	fin3RetryTime = 5
 )
 const (
-	_                 = iota
-	StatusListen      = iota
-	StatusSynSent     = iota
-	StatusSynRecved   = iota
-	StatusEstablished = iota
-	StatusFinWait1    = iota
-	StatusCloseWait   = iota
-	StatusFinWait2    = iota
-	StatusLastAck     = iota
-	StatusTimeWait    = iota
-	StatusClosed      = iota
+	_ = iota
+	StatusListen
+	StatusSynSent
+	StatusSynRecved
+	StatusEstablished
+	StatusFinWait1
+	StatusCloseWait
+	StatusFinWait2
+	StatusLastAck
+	StatusTimeWait
+	StatusClosed
 )
 
 const (
-	_       = iota
-	FDial   = iota
-	FListen = iota
+	_ = iota
+	FDial
+	FListen
 )
 const msl = 60 * 2
 
@@ -81,7 +81,7 @@ type GConn struct {
 
 func (g *GConn) init() {
 	g.initOnce.Do(func() {
-		g.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "GConn", &g), logger.DEBUG)
+		g.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "GConn", g.String()), nil)
 		g.syn1Finish = make(chan bool)
 		g.syn2Finish = make(chan bool)
 		g.fin1Finish = make(chan bool)
@@ -110,6 +110,7 @@ func (g *GConn) initLoopFDialReadUDP() {
 	g.initReadFDialUDPOnce.Do(func() {
 		if g.f == FDial {
 			go func() {
+				defer g.logger.Warning("GConn#init : stop loop read udp")
 				// recv udp
 				bs := make([]byte, udpmss, udpmss)
 				for {
@@ -145,6 +146,9 @@ func (g *GConn) initLoopFDialReadUDP() {
 		panic("not from dial")
 	})
 
+}
+func (g *GConn) String() string {
+	return fmt.Sprintf("p%v_l%v_r%v_s%v", &g, g.laddr.String(), g.raddr.String(), g.s)
 }
 
 // initWin
@@ -195,6 +199,7 @@ func (g *GConn) handleMessage(m *v1.Message) (err error) {
 func (g *GConn) sendMessage(m *v1.Message) (err error) {
 	b := m.Marshall()
 	if g.f == FDial {
+		g.logger.Error("GConn : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String())
 		_, err = g.UDPConn.Write(b)
 		if err != nil {
 			g.logger.Error("GConn : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String(), " err", err)
@@ -203,6 +208,7 @@ func (g *GConn) sendMessage(m *v1.Message) (err error) {
 		return err
 	}
 	if g.f == FListen {
+		g.logger.Error("GConn : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String())
 		_, err = g.UDPConn.WriteToUDP(b, g.raddr.toUDPAddr())
 		if err != nil {
 			g.logger.Error("GConn : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String(), " err", err)
@@ -339,7 +345,7 @@ func (g *GConn) dial() (err error) {
 // close
 // fdial or flisten
 func (g *GConn) close() (err error) {
-	g.logger.Debug("GConn#close : start , status is", g.s)
+	g.logger.Debug("GConn#close : start ")
 	if g.s != StatusEstablished {
 		return ErrConnStatus
 	}

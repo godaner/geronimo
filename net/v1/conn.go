@@ -26,23 +26,23 @@ const (
 	fin3RetryTime = 10
 )
 const (
-	_                 = iota
-	StatusListen      = iota
-	StatusSynSent     = iota
-	StatusSynRecved   = iota
-	StatusEstablished = iota
-	StatusFinWait1    = iota
-	StatusCloseWait   = iota
-	StatusFinWait2    = iota
-	StatusLastAck     = iota
-	StatusTimeWait    = iota
-	StatusClosed      = iota
+	_ = iota
+	StatusListen
+	StatusSynSent
+	StatusSynRecved
+	StatusEstablished
+	StatusFinWait1
+	StatusCloseWait
+	StatusFinWait2
+	StatusLastAck
+	StatusTimeWait
+	StatusClosed
 )
 
 const (
-	_       = iota
-	FDial   = iota
-	FListen = iota
+	_ = iota
+	FDial
+	FListen
 )
 const msl = 60 * 2
 

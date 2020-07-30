@@ -119,7 +119,7 @@ func (s *SWND) comSendWinSize() {
 
 func (s *SWND) init() {
 	s.Do(func() {
-		s.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "SWND", &s), logger.DEBUG)
+		s.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "SWND", &s), nil)
 		s.ssthresh = rule.DefSsthresh
 		s.recvWinSize = rule.DefRecWinSize
 		s.congWinSize = rule.DefCongWinSize

@@ -330,3 +330,56 @@ func TestGListener_Accept(t *testing.T) {
 	}()
 	time.Sleep(1000*time.Second)
 }
+
+func TestGListener_Close(t *testing.T) {
+	hello1:="hello1"
+	hello2:="hello2"
+	// listen
+	go func() {
+		l, err := Listen(&GAddr{
+			IP:   "192.168.6.6",
+			Port: 3333,
+		})
+		if err != nil {
+			panic(err)
+		}
+		for ; ;  {
+			c1, err := l.Accept()
+			if err != nil {
+				panic(err)
+			}
+			go func() {
+				for ;;{
+					bs:=make([]byte,len(hello1),len(hello1))
+					n,err:=c1.Read(bs)
+					fmt.Println("s r",n,err,string(bs))
+					n,err=c1.Write([]byte(hello2))
+					fmt.Println("s w",n,err)
+					c1.Close()
+					return
+				}
+
+			}()
+		}
+
+	}()
+	go func() {
+		for ;;{
+			go func() {
+				c2, err := Dial(&GAddr{
+					IP:   "192.168.6.6",
+					Port: 3333,
+				})
+				n,err:=c2.Write([]byte(hello1))
+				fmt.Println("c w",n,err)
+				bs:=make([]byte,len(hello2),len(hello2))
+				n,err=c2.Read(bs)
+				fmt.Println("c r",n,err,string(bs))
+				err=c2.Close()
+				return
+			}()
+			time.Sleep(1000*time.Millisecond)
+		}
+	}()
+	time.Sleep(1000*time.Second)
+}

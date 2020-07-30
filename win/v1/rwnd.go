@@ -138,7 +138,7 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) (err error) {
 
 func (r *RWND) init() {
 	r.Do(func() {
-		r.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "RWND", &r), logger.DEBUG)
+		r.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "RWND", &r), nil)
 		r.recvWinSize = int32(rule.DefRecWinSize)
 		r.tailSeq = rule.MinSeqN
 		r.recved = &ds.ByteBlockChan{Size: 0}
