@@ -11,6 +11,7 @@ const (
 	DEBUG
 )
 
+
 type Logger interface {
 	Debugf(fms string, arg ...interface{})
 	Debug(arg ...interface{})

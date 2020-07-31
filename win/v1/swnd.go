@@ -29,6 +29,8 @@ const (
 	quickResendIfAckGEN        = 3
 	clearReadySendInterval     = 100            //ms
 	clearReadySendLongInterval = 1000 * 60 * 60 //ms
+	closeCheckFlushNum         = 5
+	closeCheckAckNum           = 5
 )
 const (
 	rtts_a  = float64(0.125)
@@ -201,7 +203,7 @@ func (s *SWND) send(checkMSS bool) (err error) {
 			if s.readySend.Len() > 0 {
 				s.flushTimer.Reset(clearReadySendInterval) // flush after n ms
 			}
-			s.logger.Warning("SWND : read segment fail , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
+			s.logger.Debug("SWND : read segment fail , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
 			return
 		}
 		s.flushTimer.Reset(clearReadySendLongInterval) // no flush
@@ -480,7 +482,12 @@ func (s *SWND) loopFlush() {
 			select {
 			case <-s.closeSignal:
 				// send all
+				sn := 0
 				for {
+					if sn > closeCheckFlushNum {
+						s.logger.Error("SWND : stopping flush 1, flush num beynd , flush num is",sn)
+						break
+					}
 					<-time.After(10 * time.Millisecond)
 					s.logger.Debug("SWND : stopping flush 1, ready send is", s.readySend.Len())
 					if s.readySend.Len() <= 0 {
@@ -492,16 +499,23 @@ func (s *SWND) loopFlush() {
 						s.logger.Error("SWND : stopping flush 1 err , ready send is", s.readySend.Len(), ", err is", err)
 						return
 					}
+					sn++
 
 				}
 				// recv all ack
+				an := 0
 				for {
+					if an > closeCheckAckNum {
+						s.logger.Error("SWND : stopping flush 2, ack num beynd , ack num is",sn)
+						break
+					}
 					<-time.After(10 * time.Millisecond)
 					s.logger.Debug("SWND : stopping flush 2, sentC is", s.sentC)
 					if s.sentC <= 0 {
 						s.logger.Debug("SWND : stopping flush 2 finish , sentC is", s.sentC)
 						break
 					}
+					an++
 				}
 				return
 			case <-s.flushTimer.C:

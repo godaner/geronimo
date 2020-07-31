@@ -4,8 +4,16 @@ import (
 	"github.com/godaner/geronimo/logger"
 	logging "github.com/op/go-logging"
 	"os"
-	"strconv"
 )
+
+var levs = map[string]logger.Level{
+	"CRIT": logger.CRITICAL,
+	"ERRO": logger.ERROR,
+	"WARN": logger.WARNING,
+	"NOTI": logger.NOTICE,
+	"INFO": logger.INFO,
+	"DEBU": logger.DEBUG,
+}
 
 type Logger struct {
 	logger *logging.Logger
@@ -58,6 +66,7 @@ func (l *Logger) Errorf(fms string, arg ...interface{}) {
 func (l *Logger) Error(arg ...interface{}) {
 	l.logger.Error(arg...)
 }
+
 // NewLogger
 func NewLogger(module string, l *logger.Level) logger.Logger {
 	if l == nil {
@@ -84,7 +93,9 @@ func NewLogger(module string, l *logger.Level) logger.Logger {
 // getEnvLev
 func getEnvLev() *logger.Level {
 	ls := os.Getenv("LOG_LEV")
-	li64, _ := strconv.ParseInt(ls, 10, 64)
-	ll := logger.Level(li64)
-	return &ll
+	l, ok := levs[ls]
+	if !ok {
+		l = logger.INFO
+	}
+	return &l
 }
