@@ -62,21 +62,73 @@ func (s Status) String() string {
 }
 
 type GConn struct {
-	initOnce, initSendWinOnce, initRecvWinOnce, initReadFDialUDPOnce sync.Once
 	*net.UDPConn
-	f                                                          uint8
-	s                                                          Status
-	recvWin                                                    *v12.RWND
-	sendWin                                                    *v12.SWND
-	raddr                                                      *GAddr
-	laddr                                                      *GAddr
-	lis                                                        *GListener
-	synSeqX, synSeqY, finSeqU, finSeqV, finSeqW                uint32
-	syn1RetryTime, syn2RetryTime, fin1RetryTime, fin3RetryTime uint8
-	syn1Finish, syn2Finish, fin1Finish, fin3Finish             chan bool
-	mhs                                                        map[uint16]messageHandler
-	fDialCloseUDPSignal, fListenCloseUDPSignal                 chan bool
-	logger                                                     logger.Logger
+	initOnce, initSendWinOnce, initRecvWinOnce, initReadFDialUDPOnce sync.Once
+	f                                                                uint8
+	s                                                                Status
+	recvWin                                                          *v12.RWND
+	sendWin                                                          *v12.SWND
+	raddr                                                            *GAddr
+	laddr                                                            *GAddr
+	lis                                                              *GListener
+	synSeqX, synSeqY, finSeqU, finSeqV, finSeqW                      uint32
+	syn1RetryTime, syn2RetryTime, fin1RetryTime, fin3RetryTime       uint8
+	syn1Finish, syn2Finish, fin1Finish, fin3Finish                   chan bool
+	mhs                                                              map[uint16]messageHandler
+	fDialCloseUDPSignal, fListenCloseUDPSignal                       chan bool
+	logger                                                           logger.Logger
+}
+
+func (g *GConn) String() string {
+	return fmt.Sprintf("GConn:p%v,l%v,r%v", &g, g.laddr.String(), g.raddr.String())
+}
+
+func (g *GConn) Read(b []byte) (n int, err error) {
+	g.init()
+	return g.recvWin.Read(b)
+}
+
+func (g *GConn) Write(b []byte) (n int, err error) {
+	g.init()
+	if g.Status() == StatusClosed {
+		return 0, ErrConnClosed
+	}
+	return len(b), g.sendWin.Write(b)
+}
+
+func (g *GConn) Close() error {
+	g.init()
+	return g.close()
+}
+
+func (g *GConn) LocalAddr() net.Addr {
+	g.init()
+	return g.laddr
+}
+
+func (g *GConn) RemoteAddr() net.Addr {
+	g.init()
+	return g.raddr
+}
+
+func (g *GConn) SetDeadline(t time.Time) error {
+	g.init()
+	panic("implement me")
+}
+
+func (g *GConn) SetReadDeadline(t time.Time) error {
+	g.init()
+	panic("implement me")
+}
+
+func (g *GConn) SetWriteDeadline(t time.Time) error {
+	g.init()
+	panic("implement me")
+}
+
+func (g *GConn) Status() (s Status) {
+	g.init()
+	return g.s
 }
 
 func (g *GConn) init() {
@@ -147,9 +199,6 @@ func (g *GConn) initLoopFDialReadUDP() {
 	})
 
 }
-func (g *GConn) String() string {
-	return fmt.Sprintf("GConn:p%v,l%v,r%v,s%v", &g, g.laddr.String(), g.raddr.String(), g.s)
-}
 
 // initWin
 func (g *GConn) initWin() {
@@ -161,7 +210,7 @@ func (g *GConn) initWin() {
 func (g *GConn) initRecvWin() {
 	g.initRecvWinOnce.Do(func() {
 		g.recvWin = &v12.RWND{
-			FTag:g.String(),
+			FTag: g.String(),
 			AckSender: func(ack uint32, receiveWinSize uint16) (err error) {
 				m := &v1.Message{}
 				m.ACK(ack, receiveWinSize)
@@ -175,7 +224,7 @@ func (g *GConn) initRecvWin() {
 func (g *GConn) initSendWin() {
 	g.initSendWinOnce.Do(func() {
 		g.sendWin = &v12.SWND{
-			FTag:g.String(),
+			FTag: g.String(),
 			SegmentSender: func(seq uint32, bs []byte) (err error) {
 				// send udp
 				m := &v1.Message{}
@@ -234,53 +283,6 @@ func (g *GConn) closeUDPConn() {
 	if g.f == FListen {
 		g.lis.gcs.Delete(g.raddr.toUDPAddr().String())
 	}
-}
-func (g *GConn) Read(b []byte) (n int, err error) {
-	g.init()
-	return g.recvWin.Read(b)
-}
-
-func (g *GConn) Write(b []byte) (n int, err error) {
-	g.init()
-	if g.Status() == StatusClosed {
-		return 0, ErrConnClosed
-	}
-	return len(b), g.sendWin.Write(b)
-}
-
-func (g *GConn) Close() error {
-	g.init()
-	return g.close()
-}
-
-func (g *GConn) LocalAddr() net.Addr {
-	g.init()
-	return g.laddr
-}
-
-func (g *GConn) RemoteAddr() net.Addr {
-	g.init()
-	return g.raddr
-}
-
-func (g *GConn) SetDeadline(t time.Time) error {
-	g.init()
-	panic("implement me")
-}
-
-func (g *GConn) SetReadDeadline(t time.Time) error {
-	g.init()
-	panic("implement me")
-}
-
-func (g *GConn) SetWriteDeadline(t time.Time) error {
-	g.init()
-	panic("implement me")
-}
-
-func (g *GConn) Status() (s Status) {
-	g.init()
-	return g.s
 }
 func (g *GConn) closeRecvWin() (err error) {
 	if g.recvWin == nil {

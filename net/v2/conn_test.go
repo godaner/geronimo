@@ -154,8 +154,9 @@ func TestGConn_Read(t *testing.T) {
 		i := uint64(0)
 		for {
 			bs := make([]byte, len(s), len(s))
-			n, err := io.ReadFull(c2, bs)
-			fmt.Println(i, n, err, string(bs))
+			io.ReadFull(c2, bs)
+			//n, err := io.ReadFull(c2, bs)
+			//fmt.Println(i, n, err, string(bs))
 			ssmd5 := md5S(bs)
 			if ssmd5 != smd5 {
 				panic("not right md5")

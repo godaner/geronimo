@@ -23,7 +23,7 @@ const (
 
 const (
 	DefCongWinSize = 1
-	DefRecWinSize  = 16
+	DefRecWinSize  = 256
 )
 
 const (
