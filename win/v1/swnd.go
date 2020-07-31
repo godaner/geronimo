@@ -31,6 +31,7 @@ const (
 	clearReadySendLongInterval = 1000 * 60 * 60 //ms
 	closeCheckFlushNum         = 5
 	closeCheckAckNum           = 5
+	closeTimeout               = 1000 * 5 // ms
 )
 const (
 	rtts_a  = float64(0.125)
@@ -485,10 +486,9 @@ func (s *SWND) loopFlush() {
 				sn := 0
 				for {
 					if sn > closeCheckFlushNum {
-						s.logger.Error("SWND : stopping flush 1, flush num beynd , flush num is",sn)
+						s.logger.Error("SWND : stopping flush 1, flush num beynd , flush num is", sn)
 						break
 					}
-					<-time.After(10 * time.Millisecond)
 					s.logger.Debug("SWND : stopping flush 1, ready send is", s.readySend.Len())
 					if s.readySend.Len() <= 0 {
 						s.logger.Debug("SWND : stopping flush 1 finish , ready send is", s.readySend.Len())
@@ -500,22 +500,23 @@ func (s *SWND) loopFlush() {
 						return
 					}
 					sn++
+					<-time.After(10 * time.Millisecond)
 
 				}
 				// recv all ack
 				an := 0
 				for {
 					if an > closeCheckAckNum {
-						s.logger.Error("SWND : stopping flush 2, ack num beynd , ack num is",sn)
+						s.logger.Error("SWND : stopping flush 2, ack num beynd , ack num is", sn)
 						break
 					}
-					<-time.After(10 * time.Millisecond)
 					s.logger.Debug("SWND : stopping flush 2, sentC is", s.sentC)
 					if s.sentC <= 0 {
 						s.logger.Debug("SWND : stopping flush 2 finish , sentC is", s.sentC)
 						break
 					}
 					an++
+					<-time.After(10 * time.Millisecond)
 				}
 				return
 			case <-s.flushTimer.C:
@@ -538,7 +539,7 @@ func (s *SWND) Close() (err error) {
 		close(s.closeSignal)
 		select {
 		case <-s.sendFinish:
-		case <-time.After(time.Duration(5) * time.Second):
+		case <-time.After(time.Duration(closeTimeout) * time.Millisecond):
 			return ErrSWNDCloseTimeout
 		}
 
