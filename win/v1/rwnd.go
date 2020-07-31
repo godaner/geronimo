@@ -194,10 +194,12 @@ func (r *RWND) ack(tag string, ackN *uint32) {
 		r.logger.Warning("RWND : tag is ", tag, ", set ackWin")
 		r.ackWin = true
 	}
-	err := r.AckSender(*ackN, rws)
-	if err != nil {
-		r.logger.Error("RWND : tag is ", tag, ", ack callback err , err is", err.Error())
-	}
+	go func() {
+		err := r.AckSender(*ackN, rws)
+		if err != nil {
+			r.logger.Error("RWND : tag is ", tag, ", ack callback err , err is", err.Error())
+		}
+	}()
 }
 
 // incSeq

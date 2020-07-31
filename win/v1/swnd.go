@@ -293,6 +293,10 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 				continue
 			case <-reSendCancel:
 				return
+			case <-s.sendFinish:
+				s.logger.Error("SWND : send finish , caancel resend")
+				return
+
 			}
 		}
 
@@ -318,12 +322,15 @@ func (s *SWND) readASegment(checkMSS bool) (bs []byte) {
 }
 
 func (s *SWND) sendCallBack(tag string, seq uint32, bs []byte) (err error) {
-	s.logger.Debug("SWND : send , tag is", tag, ", seq is [", seq, "] , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
-	err = s.SegmentSender(seq, bs)
-	if err != nil {
-		s.logger.Error("SWND : send , tag is", tag, ", err , err is", err.Error())
-	}
-	return err
+	go func() {
+		s.logger.Debug("SWND : send , tag is", tag, ", seq is [", seq, "] , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
+		err = s.SegmentSender(seq, bs)
+		if err != nil {
+			s.logger.Error("SWND : send , tag is", tag, ", err , err is", err.Error())
+		}
+		//return err
+	}()
+	return
 }
 
 // incSeq
