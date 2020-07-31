@@ -129,7 +129,7 @@ func (s *SWND) init() {
 		if s.FTag == "" {
 			s.FTag = "nil"
 		}
-		s.logger = gologging.NewLogger(s.String(), nil)
+		s.logger = gologging.GetLogger(s.String())
 		s.ssthresh = rule.DefSsthresh
 		s.recvWinSize = rule.DefRecWinSize
 		s.congWinSize = rule.DefCongWinSize
@@ -428,7 +428,7 @@ func (s *SWND) ack(ack uint32) (match bool) {
 	//ci, ok := s.segResendCancel[ack]
 	cii, ok := s.segResendCancel.Load(ack)
 	if !ok {
-		s.logger.Warning("SWND : no be ack find , decack is", ack)
+		s.logger.Warning("SWND : repeat ack , origin ack is", originAck, " , decack is", ack)
 		return false
 	}
 	ci := cii.(chan bool)

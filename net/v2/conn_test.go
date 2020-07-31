@@ -3,6 +3,7 @@ package v2
 import (
 	"crypto/md5"
 	"fmt"
+	gologging "github.com/godaner/geronimo/logger/go-logging"
 	"io"
 	"log"
 	"net/http"
@@ -127,6 +128,8 @@ func md5S(bs []byte) (s string) {
 	return md5str2
 }
 func TestGConn_Read(t *testing.T) {
+
+	gologging.SetLogger("TestGConn_Read")
 	go http.ListenAndServe(":8888", nil)
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)

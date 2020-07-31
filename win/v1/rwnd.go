@@ -144,7 +144,7 @@ func (r *RWND) init() {
 		if r.FTag == "" {
 			r.FTag = "nil"
 		}
-		r.logger = gologging.NewLogger(r.String(), nil)
+		r.logger = gologging.GetLogger(r.String())
 		r.recvWinSize = int32(rule.DefRecWinSize)
 		r.tailSeq = rule.MinSeqN
 		r.recved = &ds.ByteBlockChan{Size: 0}

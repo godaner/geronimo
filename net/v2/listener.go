@@ -38,7 +38,7 @@ type acceptRes struct {
 
 func (g *GListener) init() {
 	g.Do(func() {
-		g.logger = gologging.NewLogger(fmt.Sprintf("%v%v", "GListener", &g), nil)
+		g.logger = gologging.GetLogger(fmt.Sprintf("%v%v", "GListener", &g))
 		g.acceptResult = make(chan *acceptRes)
 		g.closeSignal = make(chan bool)
 		g.gcs = &sync.Map{} //map[string]*GConn{}

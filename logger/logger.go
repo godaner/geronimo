@@ -11,6 +11,9 @@ const (
 	DEBUG
 )
 
+const (
+	DefLogPath = "/log"
+)
 
 type Logger interface {
 	Debugf(fms string, arg ...interface{})

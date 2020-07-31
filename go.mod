@@ -7,4 +7,5 @@ require (
 	github.com/micro/go-micro v1.18.0 // indirect
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/smartystreets/goconvey v1.6.4
+	go.mongodb.org/mongo-driver v1.4.0 // indirect
 )

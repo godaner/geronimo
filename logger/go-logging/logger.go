@@ -67,11 +67,39 @@ func (l *Logger) Error(arg ...interface{}) {
 	l.logger.Error(arg...)
 }
 
-// NewLogger
-func NewLogger(module string, l *logger.Level) logger.Logger {
-	if l == nil {
-		l = getEnvLev()
+var (
+	module  string
+	logPath string
+	level   *logger.Level
+)
+
+// SetLogger
+func SetLogger(mod string, options ...logger.Option) {
+	module = mod
+	// options
+	opts := &logger.Options{}
+	for _, v := range options {
+		if v == nil {
+			continue
+		}
+		v(opts)
 	}
+	logPath = opts.LogPath
+	level = opts.Level
+	if level == nil {
+		level = getEnvLev()
+	}
+	if logPath == "" {
+		logPath = getEnvLogPath()
+	}
+}
+
+// GetLogger
+func GetLogger(tag string) logger.Logger {
+	if module == "" {
+		panic("pls call SetLogger first")
+	}
+	// logger
 	logger, err := logging.GetLogger(module)
 	if err != nil {
 		panic(err)
@@ -79,15 +107,32 @@ func NewLogger(module string, l *logger.Level) logger.Logger {
 	if logger == nil {
 		panic("nil logger")
 	}
+	if tag != "" {
+		tag = " " + tag
+	}
 	var format = logging.MustStringFormatter(
-		"%{color}%{time:2006-01-02 15:04:05.000} " + module + " > %{level:.4s} %{color:reset} %{message}",
+		"%{color}%{time:2006-01-02 15:04:05.000} " + module + tag + " > %{level:.4s} %{color:reset} %{message}",
 	)
-	backend := logging.NewLogBackend(os.Stdout, "", 0)
-	backendFormatter := logging.NewBackendFormatter(backend, format)
-	lvlBackend := logging.AddModuleLevel(backendFormatter)
-	lvlBackend.SetLevel(logging.Level(*l), "")
-	logger.SetBackend(lvlBackend)
+	// std
+	stdLog := logging.NewLogBackend(os.Stdout, "", 0)
+	stdLogF := logging.NewBackendFormatter(stdLog, format)
+	// file
+	fileLog := logging.NewLogBackend(NewLogWrite(logPath+"/"+module, module), "", 0)
+	fileLogF := logging.NewBackendFormatter(fileLog, format)
+	// set lev
+	le := logging.MultiLogger(stdLogF, fileLogF)
+	le.SetLevel(logging.Level(*level), "")
+	logger.SetBackend(le)
 	return &Logger{logger: logger}
+}
+
+// getEnvLogPath
+func getEnvLogPath() string {
+	lp := os.Getenv("LOG_PATH")
+	if lp != "" {
+		return lp
+	}
+	return logger.DefLogPath
 }
 
 // getEnvLev

@@ -133,7 +133,7 @@ func (g *GConn) Status() (s Status) {
 
 func (g *GConn) init() {
 	g.initOnce.Do(func() {
-		g.logger = gologging.NewLogger(g.String(), nil)
+		g.logger = gologging.GetLogger(g.String())
 		g.syn1Finish = make(chan bool)
 		g.syn2Finish = make(chan bool)
 		g.fin1Finish = make(chan bool)
