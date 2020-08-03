@@ -14,6 +14,7 @@ import (
 )
 
 func TestDial(t *testing.T) {
+	gologging.SetLogger("TestDial")
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
 
@@ -25,7 +26,7 @@ func TestDial(t *testing.T) {
 	//go func() {
 	//	s()
 	//}()
-	//time.Sleep(1000000 * time.Hour)
+	time.Sleep(1000000 * time.Hour)
 }
 func r() {
 	l, err := Listen(&GAddr{
@@ -79,14 +80,14 @@ func s() {
 		panic(err)
 	}
 	fmt.Println("Dial", conn.Status() == StatusEstablished)
-	info, err := os.Stat("./src1")
+	info, err := os.Stat("./src2")
 	if err != nil {
 		panic(err)
 	}
 	size := info.Size()
 	fmt.Println(size)
 
-	file, err := os.Open("./src1")
+	file, err := os.Open("./src2")
 
 	if err != nil {
 		panic(err)

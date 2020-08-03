@@ -26,11 +26,12 @@ import (
 //
 // index =         0       1       2      3       4       5       6       7        8       9       10
 const (
+	bqSize                     = 10 // n mss
 	quickResendIfAckGEN        = 3
 	clearReadySendInterval     = 100            // ms
 	clearReadySendLongInterval = 1000 * 60 * 60 // ms
-	closeCheckFlushNum         = 5
-	closeCheckAckNum           = 5
+	closeCheckFlushNum         = bqSize * 2     // should ge bq size
+	closeCheckAckNum           = bqSize * 2
 	closeTimeout               = 1000 * 5 // ms
 )
 const (
@@ -141,7 +142,7 @@ func (s *SWND) init() {
 		s.rto = def_rto
 		s.rtts = def_rtt
 		s.rttd = def_rtt
-		s.readySend = &ds.BQ{}
+		s.readySend = &ds.BQ{Size: bqSize}
 		s.segResendCancel = &sync.Map{}
 		s.segResendQuick = &sync.Map{}
 		s.cancelResendResult = map[uint32]chan bool{}
@@ -294,7 +295,7 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 			case <-reSendCancel:
 				return
 			case <-s.sendFinish:
-				s.logger.Error("SWND : send finish , caancel resend")
+				s.logger.Error("SWND : send finish , cancel resend")
 				return
 
 			}
@@ -315,16 +316,7 @@ func (s *SWND) readASegment(checkMSS bool) (bs []byte, needFlush bool) {
 		return nil, false
 	}
 	bs = make([]byte, rule.MSS, rule.MSS)
-	//to:=make(chan bool)
-	//go func() {
-	//	<-time.After(time.Duration(1000)*time.Millisecond)
-	//	close(to)
-	//}()
 	n := s.readySend.Pop(bs)
-	//n,err := s.readySend.PopWithStop(bs,to)
-	//if err!=nil{
-	//	panic(err)
-	//}
 	return bs[:n], false
 }
 
@@ -500,7 +492,7 @@ func (s *SWND) loopFlush() {
 				sn := 0
 				for {
 					if sn > closeCheckFlushNum {
-						s.logger.Error("SWND : stopping flush 1, flush num beynd , flush num is", sn)
+						s.logger.Error("SWND : stopping flush 1, flush num beynd , flush num is", sn, ", readySend len is", s.readySend.Len())
 						break
 					}
 					s.Lock()

@@ -5,11 +5,11 @@ import (
 	"errors"
 	"github.com/godaner/geronimo/rule"
 	"sync"
+	"time"
 )
 
 const (
-	defSize = 2 * rule.DefRecWinSize * rule.MSS
-	//defSize = 1<<32 - 1
+	defSize = 10
 )
 
 var (
@@ -33,7 +33,9 @@ func (b *BQ) init() {
 		b.writeBlock = make(chan bool, 0)
 		close(b.writeBlock)
 		if b.Size <= 0 {
-			b.Size = defSize
+			b.Size = defSize * rule.MSS
+		} else {
+			b.Size *= rule.MSS
 		}
 	})
 }
@@ -52,8 +54,19 @@ func (b *BQ) Pop(byt []byte) (nn uint32) {
 	return b.pop(byt)
 }
 
-// PopWithStop
-func (b *BQ) PopWithStop(byt []byte, stop chan bool) (nn uint32, err error) {
+// BlockPop
+func (b *BQ) BlockPop(byt []byte) (nn uint32) {
+	b.init()
+	select {
+	case <-b.readBlock:
+		return b.pop(byt)
+	case <-time.After(time.Duration(1000) * time.Millisecond):
+		panic("to")
+	}
+}
+
+// BlockPopWithStop
+func (b *BQ) BlockPopWithStop(byt []byte, stop chan bool) (nn uint32, err error) {
 	b.init()
 	select {
 	case <-b.readBlock:
@@ -113,36 +126,35 @@ func (b *BQ) push(byt ...byte) (rest []byte) {
 	}
 }
 
+// pop
 func (b *BQ) pop(byt []byte) (nn uint32) {
-	return func() (nn uint32) {
-		b.Lock()
-		defer b.Unlock()
-		l := uint32(len(b.bs))
-		if l <= 0 {
-			return
+	b.Lock()
+	defer b.Unlock()
+	l := uint32(len(b.bs))
+	if l <= 0 {
+		return
+	}
+	n := uint32(len(byt))
+	if n <= 0 || l < n {
+		n = l
+	}
+	copy(byt, b.bs[:n])
+	b.bs = b.bs[n:]
+	nl := uint32(len(b.bs))
+	if nl < b.Size {
+		select {
+		case <-b.writeBlock:
+		default:
+			close(b.writeBlock)
 		}
-		n := uint32(len(byt))
-		if n <= 0 || l < n {
-			n = l
+	}
+	if nl <= 0 { // block read
+		select {
+		case <-b.readBlock:
+		default:
+			close(b.readBlock)
 		}
-		copy(byt, b.bs[:n])
-		b.bs = b.bs[n:]
-		nl := uint32(len(b.bs))
-		if nl < b.Size {
-			select {
-			case <-b.writeBlock:
-			default:
-				close(b.writeBlock)
-			}
-		}
-		if nl <= 0 { // block read
-			select {
-			case <-b.readBlock:
-			default:
-				close(b.readBlock)
-			}
-			b.readBlock = make(chan bool)
-		}
-		return n
-	}()
+		b.readBlock = make(chan bool)
+	}
+	return n
 }

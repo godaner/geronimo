@@ -84,7 +84,7 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 		return 0, nil
 	}
 	var nn uint32
-	nn, err = r.recved.PopWithStop(bs, r.closeSignal)
+	nn, err = r.recved.BlockPopWithStop(bs, r.closeSignal)
 	if err != nil {
 		return 0, io.EOF
 	}
