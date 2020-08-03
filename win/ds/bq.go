@@ -49,8 +49,7 @@ func (b *BQ) Len() uint32 {
 // Pop
 func (b *BQ) Pop(byt []byte) (nn uint32) {
 	b.init()
-	nn, _ = b.PopWithStop(byt, make(chan bool))
-	return nn
+	return b.pop(byt)
 }
 
 // PopWithStop
@@ -58,37 +57,7 @@ func (b *BQ) PopWithStop(byt []byte, stop chan bool) (nn uint32, err error) {
 	b.init()
 	select {
 	case <-b.readBlock:
-		return func() (nn uint32, err error) {
-			b.Lock()
-			defer b.Unlock()
-			l := uint32(len(b.bs))
-			if l <= 0 {
-				return
-			}
-			n := uint32(len(byt))
-			if n <= 0 || l < n {
-				n = l
-			}
-			copy(byt, b.bs[:n])
-			b.bs = b.bs[n:]
-			nl := uint32(len(b.bs))
-			if l >= b.Size && nl < b.Size {
-				select {
-				case <-b.writeBlock:
-				default:
-					close(b.writeBlock)
-				}
-			}
-			if nl <= 0 { // block read
-				select {
-				case <-b.readBlock:
-				default:
-					close(b.readBlock)
-				}
-				b.readBlock = make(chan bool)
-			}
-			return n, nil
-		}()
+		return b.pop(byt), nil
 	case <-stop:
 		return 0, ErrStoped
 	}
@@ -124,7 +93,7 @@ func (b *BQ) push(byt ...byte) (rest []byte) {
 		}
 		b.bs = append(b.bs, byt[:s]...)
 		nl := uint32(len(b.bs))
-		if l <= 0 && nl > 0 {
+		if nl > 0 {
 			select {
 			case <-b.readBlock:
 			default:
@@ -142,4 +111,38 @@ func (b *BQ) push(byt ...byte) (rest []byte) {
 		b.Unlock()
 		return byt[s:]
 	}
+}
+
+func (b *BQ) pop(byt []byte) (nn uint32) {
+	return func() (nn uint32) {
+		b.Lock()
+		defer b.Unlock()
+		l := uint32(len(b.bs))
+		if l <= 0 {
+			return
+		}
+		n := uint32(len(byt))
+		if n <= 0 || l < n {
+			n = l
+		}
+		copy(byt, b.bs[:n])
+		b.bs = b.bs[n:]
+		nl := uint32(len(b.bs))
+		if nl < b.Size {
+			select {
+			case <-b.writeBlock:
+			default:
+				close(b.writeBlock)
+			}
+		}
+		if nl <= 0 { // block read
+			select {
+			case <-b.readBlock:
+			default:
+				close(b.readBlock)
+			}
+			b.readBlock = make(chan bool)
+		}
+		return n
+	}()
 }

@@ -197,11 +197,11 @@ func (s *SWND) seqSpace(aSeq, bSeq, maxSeq uint32) (ss uint32) {
 // send
 func (s *SWND) send(checkMSS bool) (err error) {
 	for {
-		bs,needFlush := s.readASegment(checkMSS)
-		if needFlush{
+		bs, needFlush := s.readASegment(checkMSS)
+		if needFlush {
 			s.flushTimer.Reset(clearReadySendInterval) // flush after n ms
 			s.logger.Debug("SWND : need flush , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
-		}else{
+		} else {
 			s.flushTimer.Reset(clearReadySendLongInterval) // no flush
 		}
 		if len(bs) <= 0 {
@@ -304,16 +304,28 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 }
 
 // readASegment
-func (s *SWND) readASegment(checkMSS bool) (bs []byte,needFlush bool) {
+func (s *SWND) readASegment(checkMSS bool) (bs []byte, needFlush bool) {
 	if s.sendWinSize-s.sentC <= 0 { // no enough win size to send todo
-		return nil,false
+		return nil, false
 	}
 	if checkMSS && s.readySend.Len() < rule.MSS { // no enough data to fill a mss
-		return nil,true
+		if s.readySend.Len() > 0 {
+			return nil, true
+		}
+		return nil, false
 	}
 	bs = make([]byte, rule.MSS, rule.MSS)
+	//to:=make(chan bool)
+	//go func() {
+	//	<-time.After(time.Duration(1000)*time.Millisecond)
+	//	close(to)
+	//}()
 	n := s.readySend.Pop(bs)
-	return bs[:n],false
+	//n,err := s.readySend.PopWithStop(bs,to)
+	//if err!=nil{
+	//	panic(err)
+	//}
+	return bs[:n], false
 }
 
 func (s *SWND) sendCallBack(tag string, seq uint32, bs []byte) (err error) {
