@@ -55,7 +55,7 @@ type SWND struct {
 	SegmentSender      SegmentSender
 	sentC              int64
 	ackSeqCache        *sync.Map            // map[uint32]bool      // for slide head to right
-	readySend          *ds.ByteBlockChan    // from app , cache data , wait for send
+	readySend          *ds.BQ               // from app , cache data , wait for send
 	segResendCancel    *sync.Map            // map[uint32]chan bool // for cancel resend
 	segResendQuick     *sync.Map            // map[uint32]chan bool // for quick resend
 	quickResendAckNum  *sync.Map            // map[uint32]*uint8    // for quick resend
@@ -84,7 +84,7 @@ func (s *SWND) Write(bs []byte) (err error) {
 		return ErrSWNDClosed
 	default:
 	}
-	s.readySend.BlockPushs(bs...)
+	s.readySend.Push(bs...)
 	return s.send(true)
 }
 
@@ -101,9 +101,7 @@ func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) (err error) {
 	//s.comSendWinSize()
 	//s.recvWinSize = int64(s.sendAbleNum(winSize, ack)) + s.sentC
 	//s.comSendWinSize()
-	s.Lock()
 	defer func() {
-		s.Unlock()
 		s.trimAck()
 		err = s.send(true)
 	}()
@@ -139,14 +137,14 @@ func (s *SWND) init() {
 		s.rto = def_rto
 		s.rtts = def_rtt
 		s.rttd = def_rtt
-		s.readySend = &ds.ByteBlockChan{Size: 0}
+		s.readySend = &ds.BQ{}
 		s.segResendCancel = &sync.Map{}
 		s.segResendQuick = &sync.Map{}
 		s.cancelResendResult = map[uint32]chan bool{}
 		s.quickResendResult = map[uint32]chan bool{}
 		s.quickResendAckNum = &sync.Map{}
 		s.ackSeqCache = &sync.Map{}
-		s.flushTimer = time.NewTimer(checkWinInterval)
+		s.flushTimer = time.NewTimer(time.Duration(clearReadySendInterval) * time.Millisecond)
 		s.closeSignal = make(chan bool)
 		s.closeSignal = make(chan bool)
 		s.sendFinish = make(chan bool)
@@ -311,14 +309,9 @@ func (s *SWND) readASegment(checkMSS bool) (bs []byte) {
 	if checkMSS && s.readySend.Len() < rule.MSS { // no enough data to fill a mss
 		return
 	}
-	for i := 0; i < rule.MSS; i++ {
-		usable, b, _ := s.readySend.Pop()
-		if !usable {
-			break
-		}
-		bs = append(bs, b)
-	}
-	return bs
+	bs = make([]byte, rule.MSS, rule.MSS)
+	n := s.readySend.Pop(bs)
+	return bs[:n]
 }
 
 func (s *SWND) sendCallBack(tag string, seq uint32, bs []byte) (err error) {
@@ -374,6 +367,8 @@ func (s *SWND) incRTO() {
 
 // quickResendSegment
 func (s *SWND) quickResendSegment(ack uint32) (match bool) {
+	s.Lock()
+	defer s.Unlock()
 	zero := uint8(0)
 	//num, ok := s.quickResendAckNum[ack]
 	numI, ok := s.quickResendAckNum.Load(ack)
@@ -430,6 +425,8 @@ func (s *SWND) resetQuickResendAckNum(ack uint32) {
 
 // ack
 func (s *SWND) ack(ack uint32) (match bool) {
+	s.Lock()
+	defer s.Unlock()
 	originAck := ack
 	s.decSeq(&ack, 1)
 	//ci, ok := s.segResendCancel[ack]

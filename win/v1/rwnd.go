@@ -40,7 +40,7 @@ type RWND struct {
 	sync.Mutex
 	sync.Once
 	AckSender   AckSender
-	recved      *ds.ByteBlockChan
+	recved      *ds.BQ
 	recvWinSize int32     // recv window size
 	readyRecv   *sync.Map //map[uint32]*rData // cache recved package
 	tailSeq     uint32    // current tail seq , location is tail
@@ -83,24 +83,12 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 	if len(bs) <= 0 {
 		return 0, nil
 	}
-	bs[0], _, err = r.recved.BlockPopWithStop(r.closeSignal)
+	var nn uint32
+	nn, err = r.recved.PopWithStop(bs, r.closeSignal)
 	if err != nil {
 		return 0, io.EOF
 	}
-	n = 1
-	for i := 1; i < len(bs); i++ {
-		usable, b, _, err := r.recved.PopWithStop(r.closeSignal)
-		if err != nil {
-			return 0, io.EOF
-		}
-		if !usable {
-			break
-		}
-		bs[i] = b
-		n++
-		//r.logger.Debug("RWND : read , win size is", r.getRecvWinSize(), ", char is", string(b))
-	}
-	return n, nil
+	return int(nn), nil
 }
 
 // RecvSegment
@@ -147,7 +135,7 @@ func (r *RWND) init() {
 		r.logger = gologging.GetLogger(r.String())
 		r.recvWinSize = int32(rule.DefRecWinSize)
 		r.tailSeq = rule.MinSeqN
-		r.recved = &ds.ByteBlockChan{Size: 0}
+		r.recved = &ds.BQ{}
 		r.readyRecv = &sync.Map{}
 		r.closeSignal = make(chan bool)
 		//r.loopAckWin()
@@ -174,7 +162,7 @@ func (r *RWND) recv() {
 		// slide window , next seq
 		r.incSeq(&r.tailSeq, 1)
 		// put data to received
-		r.recved.BlockPushs(d.bs...)
+		r.recved.Push(d.bs...)
 		// reset window size
 		r.incRecvWinSize(1)
 		// ack it
