@@ -98,33 +98,48 @@ func (b *BQ) PopWithStop(byt []byte, stop chan bool) (nn uint32, err error) {
 //   Push
 func (b *BQ) Push(byt ...byte) {
 	b.init()
+	for {
+		bl := uint32(len(byt))
+		if bl <= 0 {
+			return
+		}
+		byt = b.push(byt...)
+	}
+}
+
+// push
+func (b *BQ) push(byt ...byte) (rest []byte) {
 	select {
 	case <-b.writeBlock:
-		func() {
-			b.Lock()
-			defer b.Unlock()
-			l := uint32(len(b.bs))
-			if l >= b.Size {
-				return
+		b.Lock()
+		l := uint32(len(b.bs))
+		if l >= b.Size {
+			b.Unlock()
+			return byt
+		}
+		s := int(b.Size) - len(b.bs)
+		bytl := len(byt)
+		if bytl < s {
+			s = bytl
+		}
+		b.bs = append(b.bs, byt[:s]...)
+		nl := uint32(len(b.bs))
+		if l <= 0 && nl > 0 {
+			select {
+			case <-b.readBlock:
+			default:
+				close(b.readBlock)
 			}
-			b.bs = append(b.bs, byt...)
-			nl := uint32(len(b.bs))
-			if l <= 0 && nl > 0 {
-				select {
-				case <-b.readBlock:
-				default:
-					close(b.readBlock)
-				}
+		}
+		if nl >= b.Size { // block write
+			select {
+			case <-b.writeBlock:
+			default:
+				close(b.writeBlock)
 			}
-			if nl >= b.Size { // block write
-				select {
-				case <-b.writeBlock:
-				default:
-					close(b.writeBlock)
-				}
-				b.writeBlock = make(chan bool)
-			}
-		}()
-		return
+			b.writeBlock = make(chan bool)
+		}
+		b.Unlock()
+		return byt[s:]
 	}
 }

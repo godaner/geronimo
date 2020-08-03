@@ -85,6 +85,8 @@ func (s *SWND) Write(bs []byte) (err error) {
 	default:
 	}
 	s.readySend.Push(bs...)
+	s.Lock()
+	defer s.Unlock()
 	return s.send(true)
 }
 
@@ -101,9 +103,11 @@ func (s *SWND) RecvAckSegment(winSize uint16, ack uint32) (err error) {
 	//s.comSendWinSize()
 	//s.recvWinSize = int64(s.sendAbleNum(winSize, ack)) + s.sentC
 	//s.comSendWinSize()
+	s.Lock()
 	defer func() {
 		s.trimAck()
 		err = s.send(true)
+		s.Unlock()
 	}()
 	s.logger.Debug("SWND : recv ack is [", ack, "] , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize)
 	// recv 0-3 => ack = 4
@@ -153,9 +157,7 @@ func (s *SWND) init() {
 	})
 }
 func (s *SWND) trimAck() {
-	s.Lock()
 	defer func() {
-		s.Unlock()
 		s.logger.Debug("SWND : trimAck , sent len is", s.sentC)
 	}()
 	for {
@@ -194,18 +196,18 @@ func (s *SWND) seqSpace(aSeq, bSeq, maxSeq uint32) (ss uint32) {
 
 // send
 func (s *SWND) send(checkMSS bool) (err error) {
-	s.Lock()
-	defer s.Unlock()
 	for {
-		bs := s.readASegment(checkMSS)
+		bs,needFlush := s.readASegment(checkMSS)
+		if needFlush{
+			s.flushTimer.Reset(clearReadySendInterval) // flush after n ms
+			s.logger.Debug("SWND : need flush , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
+		}else{
+			s.flushTimer.Reset(clearReadySendLongInterval) // no flush
+		}
 		if len(bs) <= 0 {
-			if s.readySend.Len() > 0 {
-				s.flushTimer.Reset(clearReadySendInterval) // flush after n ms
-			}
 			s.logger.Debug("SWND : read segment fail , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
 			return
 		}
-		s.flushTimer.Reset(clearReadySendLongInterval) // no flush
 		// add sent count
 		atomic.AddInt64(&s.sentC, 1)
 		// set segment timeout
@@ -302,16 +304,16 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 }
 
 // readASegment
-func (s *SWND) readASegment(checkMSS bool) (bs []byte) {
+func (s *SWND) readASegment(checkMSS bool) (bs []byte,needFlush bool) {
 	if s.sendWinSize-s.sentC <= 0 { // no enough win size to send todo
-		return
+		return nil,false
 	}
 	if checkMSS && s.readySend.Len() < rule.MSS { // no enough data to fill a mss
-		return
+		return nil,true
 	}
 	bs = make([]byte, rule.MSS, rule.MSS)
 	n := s.readySend.Pop(bs)
-	return bs[:n]
+	return bs[:n],false
 }
 
 func (s *SWND) sendCallBack(tag string, seq uint32, bs []byte) (err error) {
@@ -367,8 +369,6 @@ func (s *SWND) incRTO() {
 
 // quickResendSegment
 func (s *SWND) quickResendSegment(ack uint32) (match bool) {
-	s.Lock()
-	defer s.Unlock()
 	zero := uint8(0)
 	//num, ok := s.quickResendAckNum[ack]
 	numI, ok := s.quickResendAckNum.Load(ack)
@@ -425,8 +425,6 @@ func (s *SWND) resetQuickResendAckNum(ack uint32) {
 
 // ack
 func (s *SWND) ack(ack uint32) (match bool) {
-	s.Lock()
-	defer s.Unlock()
 	originAck := ack
 	s.decSeq(&ack, 1)
 	//ci, ok := s.segResendCancel[ack]
@@ -493,16 +491,20 @@ func (s *SWND) loopFlush() {
 						s.logger.Error("SWND : stopping flush 1, flush num beynd , flush num is", sn)
 						break
 					}
+					s.Lock()
 					s.logger.Debug("SWND : stopping flush 1, ready send is", s.readySend.Len())
 					if s.readySend.Len() <= 0 {
 						s.logger.Debug("SWND : stopping flush 1 finish , ready send is", s.readySend.Len())
+						s.Unlock()
 						break
 					}
 					err := s.send(false) // clear data
 					if err != nil {
 						s.logger.Error("SWND : stopping flush 1 err , ready send is", s.readySend.Len(), ", err is", err)
+						s.Unlock()
 						return
 					}
+					s.Unlock()
 					sn++
 					<-time.After(10 * time.Millisecond)
 
@@ -524,12 +526,15 @@ func (s *SWND) loopFlush() {
 				}
 				return
 			case <-s.flushTimer.C:
+				s.Lock()
 				s.logger.Debug("SWND : flushing , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", recv win size is", s.recvWinSize, ", cong win size is", s.congWinSize, ", rto is", int64(s.rto))
 				err := s.send(false)
 				if err != nil {
 					s.logger.Debug("SWND : flushing err , err is", err)
+					s.Unlock()
 					continue
 				}
+				s.Unlock()
 			}
 		}
 	}()

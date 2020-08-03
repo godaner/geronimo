@@ -6,7 +6,20 @@ import (
 	"testing"
 	"time"
 )
+func TestBQ_Len(t *testing.T) {
+	a:=[]byte{'a','b','c'}
+	b:=a[1:]
+	a=append(a,'d')
+	b=append(b,'d')
+	b=append(b,'d')
+	c:=[]byte{'b','c'}
+	c=append(c,'d')
+	c=append(c,'d')
+	fmt.Println(len(a),cap(a))
+	fmt.Println(len(b),cap(b))
+	fmt.Println(len(c),cap(c))
 
+}
 func TestByteBlockChan_Push(t *testing.T) {
 	b:=&BQ{Size: 10}
 	b.Push([]byte("zhang")...)
