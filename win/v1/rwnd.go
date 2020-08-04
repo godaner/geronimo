@@ -267,6 +267,7 @@ func (r *RWND) Close() (err error) {
 	r.init()
 	select {
 	case <-r.closeSignal:
+		return nil
 	default:
 		close(r.closeSignal)
 	}

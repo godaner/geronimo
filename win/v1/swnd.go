@@ -29,6 +29,7 @@ const (
 	readySendMaxMSS     = 10
 	readySendMaxSIze    = readySendMaxMSS * rule.MSS // n mss
 	quickResendIfAckGEN = 3
+	maxResendC          = 10
 )
 const (
 	closeTimeout               = 1000 * 5       // ms
@@ -273,7 +274,7 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 		panic("fuck ! who repeat this ?")
 	default:
 	}
-
+	resendC := 0
 	rttms := time.Now().UnixNano() // ms
 	s.logger.Debug("SWND : set resend progress success , seq is", seq)
 	go func() {
@@ -303,6 +304,10 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 		for {
 			select {
 			case <-t.C:
+				if maxResendC < resendC {
+					return
+				}
+				resendC++
 				s.ssthresh = s.congWinSize / 2
 				s.congWinSize = 1
 				s.comSendWinSize()
@@ -316,6 +321,10 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 				t.Reset(time.Duration(int64(s.rto)) * time.Nanosecond)
 				continue
 			case <-reSendQuick:
+				if maxResendC < resendC {
+					return
+				}
+				resendC++
 				s.ssthresh = s.congWinSize / 2
 				s.congWinSize = s.ssthresh
 				s.comSendWinSize()
@@ -340,27 +349,6 @@ func (s *SWND) setSegmentResend(seq uint32, bs []byte) {
 
 	}()
 }
-
-// read
-//func (s *SWND) read(checkMSS bool) (bs []byte, needFlush bool) {
-//	if s.readySend.Len() <= 0 {
-//		return nil, false
-//	}
-//	if checkMSS {
-//		if s.sendWinSize-s.sentC <= 0 { // no enough win size to send todo
-//			return nil, false
-//		}
-//		if s.readySend.Len() < rule.MSS { // no enough data to fill a mss
-//			if s.readySend.Len() > 0 {
-//				return nil, true
-//			}
-//			return nil, false
-//		}
-//	}
-//	bs = make([]byte, rule.MSS, rule.MSS)
-//	n := s.readySend.BlockPop(bs) // todo ?? blockpop ??
-//	return bs[:n], false
-//}
 
 func (s *SWND) sendCallBack(tag string, seq uint32, bs []byte) (err error) {
 	go func() {
@@ -448,13 +436,15 @@ func (s *SWND) quickResendSegment(ack uint32) (match bool) {
 		select {
 		case <-r:
 			s.logger.Debug("SWND : quick resend ack is", ack)
-		case <-time.After(1000 * time.Millisecond):
+		case <-time.After(100 * time.Millisecond): // max wait time
 			s.logger.Error("SWND : quick resend timeout , ack is", ack)
-			panic("quick resend timeout , ack is " + fmt.Sprint(ack))
-
+			//panic("quick resend timeout , ack is " + fmt.Sprint(ack))
+			return true
 		}
-	case <-time.After(100 * time.Millisecond):
+	default:
+		//case <-time.After(100 * time.Millisecond):
 		s.logger.Error("SWND : no resend imm be found , ack is", ack)
+		return false
 	}
 	return true
 }
@@ -491,15 +481,18 @@ func (s *SWND) ack(ack uint32) (match bool) {
 		case <-r:
 			s.logger.Debug("SWND : cancel resend finish , origin ack is", originAck, ", rto is", int64(s.rto))
 			return true
-		case <-time.After(1000 * time.Millisecond):
+		case <-time.After(100 * time.Millisecond): // max wait time
 			s.logger.Error("SWND : cancel resend timeout , origin ack is", originAck)
-			panic("cancel resend timeout , origin ack is " + fmt.Sprint(originAck))
+			//panic("cancel resend timeout , origin ack is " + fmt.Sprint(originAck))
+			return true
 		}
+	default:
+		s.logger.Debug("SWND : no resend cancel be found , origin ack is", originAck)
 		//case <-time.After(100 * time.Millisecond):
 		//	s.logger.Debug("SWND : no resend cancel be found , origin ack is", originAck)
 		//	return
+		return false
 	}
-	return true
 }
 
 // loopPrint
