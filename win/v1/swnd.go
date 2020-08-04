@@ -435,7 +435,7 @@ func (s *SWND) quickResendSegment(ack uint32) (match bool) {
 		s.logger.Debug("SWND : find quick resend , ack is", ack)
 		select {
 		case <-r:
-			s.logger.Debug("SWND : quick resend ack is", ack)
+			s.logger.Info("SWND : quick resend ack is", ack)
 		case <-time.After(100 * time.Millisecond): // max wait time
 			s.logger.Error("SWND : quick resend timeout , ack is", ack)
 			//panic("quick resend timeout , ack is " + fmt.Sprint(ack))
