@@ -29,7 +29,7 @@ const (
 	readySendMaxMSS     = 10
 	readySendMaxSIze    = readySendMaxMSS * rule.MSS // n mss
 	quickResendIfAckGEN = 3
-	maxResendC          = 10
+	maxResendC          = 15
 )
 const (
 	closeTimeout               = 1000 * 5       // ms
@@ -47,10 +47,10 @@ const (
 const (
 	rtts_a  = float64(0.125)
 	rttd_b  = float64(0.25)
-	def_rto = float64(100 * 1e6) // ns
-	def_rtt = float64(100 * 1e6) // ns
-	min_rto = float64(10)        // ns
-	max_rto = float64(500 * 1e6) // ns
+	def_rto = float64(100 * 1e6)       // ns
+	def_rtt = float64(100 * 1e6)       // ns
+	min_rto = float64(200 * 1e6)       // ns
+	max_rto = float64(120 * 1e3 * 1e6) // ns
 )
 
 var (

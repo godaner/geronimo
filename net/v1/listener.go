@@ -10,6 +10,10 @@ import (
 	"sync"
 )
 
+const (
+	msgQSize = 100
+)
+
 func Listen(addr *GAddr) (l net.Listener, err error) {
 	c, err := net.ListenUDP("udp", addr.toUDPAddr())
 	if err != nil {
@@ -28,6 +32,8 @@ type GListener struct {
 	c            *net.UDPConn
 	gcs          *sync.Map //map[string]*GConn
 	acceptResult chan *acceptRes
+	msgs         *sync.Map
+	closes       *sync.Map
 	closeSignal  chan bool
 	logger       logger.Logger
 }
@@ -42,6 +48,8 @@ func (g *GListener) init() {
 		g.acceptResult = make(chan *acceptRes)
 		g.closeSignal = make(chan bool)
 		g.gcs = &sync.Map{} //map[string]*GConn{}
+		g.msgs = &sync.Map{}
+		g.closes = &sync.Map{}
 		go func() {
 			bs := make([]byte, udpmss, udpmss)
 			for {
@@ -71,17 +79,50 @@ func (g *GListener) init() {
 							lis:     g,
 						}
 						g.gcs.Store(rAddr.String(), gc)
+						msg := make(chan *v1.Message, msgQSize)
+						g.msgs.Store(rAddr.String(), msg)
+						closeS := make(chan bool)
+						g.closes.Store(rAddr.String(), closeS)
+						go func() {
+							for {
+								select {
+								case <-closeS:
+									return
+								case m := <-msg:
+									err = gc.handleMessage(m)
+									if err != nil {
+										g.logger.Error("GListener#init : handleMessage err", err)
+										return
+									}
+								}
+							}
+						}()
 					}
 					g.logger.Debug("GListener#init : recv msg from", rAddr.String(), ", msg flag is ", m1.Flag())
-					err = gc.handleMessage(m1)
-					if err != nil {
-						g.logger.Error("GListener#init : handleMessage err", err)
-						return
-					}
+					msgI, _ := g.msgs.Load(rAddr.String())
+					msg := msgI.(chan *v1.Message)
+					msg <- m1
 				}()
 			}
 		}()
 	})
+}
+
+// rmGConn
+func (g *GListener) rmGConn(addr interface{}) {
+	if g == nil {
+		return
+	}
+	g.gcs.Delete(addr)
+	g.msgs.Delete(addr)
+	csI, ok := g.closes.Load(addr)
+	if !ok {
+		return
+	}
+	cs := csI.(chan bool)
+	close(cs)
+	g.closes.Delete(addr)
+
 }
 func (g *GListener) Accept() (c net.Conn, err error) {
 	g.init()
@@ -102,7 +143,7 @@ func (g *GListener) Close() error {
 	g.gcs.Range(func(key, value interface{}) bool {
 		c := value.(*GConn)
 		c.Close()
-		g.gcs.Delete(key)
+		g.rmGConn(key)
 		return true
 	})
 	return nil
