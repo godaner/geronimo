@@ -62,6 +62,7 @@ func (s Status) String() string {
 }
 
 type GConn struct {
+	sync.RWMutex
 	*net.UDPConn
 	initOnce, initSendWinOnce, initRecvWinOnce, initReadFDialUDPOnce sync.Once
 	f                                                                uint8
@@ -237,6 +238,8 @@ func (g *GConn) initSendWin() {
 
 // handleMessage
 func (g *GConn) handleMessage(m *v1.Message) (err error) {
+	g.Lock()
+	defer g.Unlock()
 	g.init()
 	mh, ok := g.mhs[m.Flag()]
 	if ok && mh != nil {

@@ -102,7 +102,7 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) (err error) {
 	}
 	r.Lock()
 	defer r.Unlock()
-	r.logger.Debug("RWND : recv seq is [", seqN, "]")
+	r.logger.Info("RWND : recv seq is [", seqN, "]")
 	if !r.inRecvSeqRange(seqN) {
 		ackN := seqN
 		r.incSeq(&ackN, 1)
@@ -178,7 +178,7 @@ func (r *RWND) ack(tag string, ackN *uint32) {
 		ackN = &a
 	}
 	rws := r.getRecvWinSize()
-	r.logger.Debug("RWND : tag is ", tag, " , send ack , ack is [", *ackN, "] , win size is", rws)
+	r.logger.Info("RWND : tag is ", tag, " , send ack , ack is [", *ackN, "] , win size is", rws)
 	if rws <= 0 {
 		r.logger.Warning("RWND : tag is ", tag, ", set ackWin")
 		r.ackWin = true

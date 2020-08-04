@@ -187,6 +187,7 @@ func TestGConn_Read(t *testing.T) {
 }
 func TestGConn_Close(t *testing.T) {
 
+	gologging.SetLogger("TestGConn_Close")
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
 	s := []byte{}
@@ -337,6 +338,7 @@ func TestGListener_Accept(t *testing.T) {
 }
 
 func TestGListener_Close(t *testing.T) {
+	gologging.SetLogger("TestGListener_Close")
 	hello1:="hello1"
 	hello2:="hello2"
 	// listen

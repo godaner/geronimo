@@ -87,7 +87,7 @@ func (g *GConn) ackMessageHandler(m *v1.Message) (err error) {
 	g.logger.Debug("GConn#ackMessageHandler : start")
 	if g.sendWin == nil {
 		g.logger.Error("GConn＃ackMessageHandler : sendWin is nil")
-		//g.Close()
+		g.Close()
 		return
 	}
 	return g.sendWin.RecvAckSegment(m.WinSize(), m.AckN())
@@ -98,7 +98,7 @@ func (g *GConn) payloadMessageHandler(m *v1.Message) (err error) {
 	g.logger.Debug("GConn#payloadMessageHandler : start")
 	if g.recvWin == nil {
 		g.logger.Error("GConn#payloadMessageHandler : recvWin is nil")
-		//g.Close()
+		g.Close()
 		return
 	}
 	return g.recvWin.RecvSegment(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))

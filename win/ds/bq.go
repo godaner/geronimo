@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	defSize = 10
+	defSize = 10 * rule.MSS
 )
 
 var (
@@ -33,9 +33,7 @@ func (b *BQ) init() {
 		b.writeBlock = make(chan bool, 0)
 		close(b.writeBlock)
 		if b.Size <= 0 {
-			b.Size = defSize * rule.MSS
-		} else {
-			b.Size *= rule.MSS
+			b.Size = defSize
 		}
 	})
 }

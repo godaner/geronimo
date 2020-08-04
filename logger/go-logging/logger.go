@@ -140,7 +140,7 @@ func getEnvLev() *logger.Level {
 	ls := os.Getenv("LOG_LEV")
 	l, ok := levs[ls]
 	if !ok {
-		l = logger.INFO
+		l = logger.CRITICAL
 	}
 	return &l
 }
