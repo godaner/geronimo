@@ -107,6 +107,7 @@ func (r *RWND) RecvSegment(seqN uint32, bs []byte) (err error) {
 		ackN := seqN
 		r.incSeq(&ackN, 1)
 		r.ack("4", &ackN)
+		r.logger.Warning("RWND : not allow seq , recv seq is [", seqN, "]", ", ack is", ackN)
 		return
 	}
 	rdI, ok := r.readyRecv.Load(seqN)

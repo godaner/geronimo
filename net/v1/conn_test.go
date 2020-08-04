@@ -3,6 +3,7 @@ package v1
 import (
 	"crypto/md5"
 	"fmt"
+	gologging "github.com/godaner/geronimo/logger/go-logging"
 	"io"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 )
 
 func TestDial(t *testing.T) {
+	gologging.SetLogger("TestDial")
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
 
@@ -24,7 +26,7 @@ func TestDial(t *testing.T) {
 	//go func() {
 	//	s()
 	//}()
-	//time.Sleep(1000000 * time.Hour)
+	time.Sleep(1000000 * time.Hour)
 }
 func r() {
 	l, err := Listen(&GAddr{
@@ -127,6 +129,8 @@ func md5S(bs []byte) (s string) {
 	return md5str2
 }
 func TestGConn_Read(t *testing.T) {
+
+	gologging.SetLogger("TestGConn_Read")
 	go http.ListenAndServe(":8888", nil)
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
@@ -154,8 +158,9 @@ func TestGConn_Read(t *testing.T) {
 		i := uint64(0)
 		for {
 			bs := make([]byte, len(s), len(s))
-			n, err := io.ReadFull(c2, bs)
-			fmt.Println(i, n, err, string(bs))
+			io.ReadFull(c2, bs)
+			//n, err := io.ReadFull(c2, bs)
+			//fmt.Println(i, n,len(bs), err, string(bs))
 			ssmd5 := md5S(bs)
 			if ssmd5 != smd5 {
 				panic("not right md5")
@@ -263,6 +268,7 @@ func TestGConn_Close2(t *testing.T) {
 		IP:   "192.168.6.6",
 		Port: 3333,
 	})
+	fmt.Println("w dial",c1,err)
 	n,err:=c1.Write([]byte("ccccccccccccccc"))
 	fmt.Println("w n",n)
 	if err!=nil{
@@ -284,8 +290,6 @@ func TestGListener_Accept(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-
-
 		i:=10
 		for ; ;  {
 			c1, err := l.Accept()
@@ -313,7 +317,8 @@ func TestGListener_Accept(t *testing.T) {
 		bs:=make([]byte,2,2)
 		n,err=c2.Read(bs)
 		fmt.Println("c2 r",n,err,string(bs))
-		//err=c1.Close()
+		err=c2.Close()
+		fmt.Println("c2 c",err,c2.Status())
 	}()
 	go func() {
 		c3, err := Dial(&GAddr{
@@ -325,7 +330,61 @@ func TestGListener_Accept(t *testing.T) {
 		bs:=make([]byte,2,2)
 		n,err=c3.Read(bs)
 		fmt.Println("c3 r",n,err,string(bs))
-		//err=c1.Close()
+		err=c3.Close()
+		fmt.Println("c3 c",err,c3.Status())
+	}()
+	time.Sleep(1000*time.Second)
+}
+
+func TestGListener_Close(t *testing.T) {
+	hello1:="hello1"
+	hello2:="hello2"
+	// listen
+	go func() {
+		l, err := Listen(&GAddr{
+			IP:   "192.168.6.6",
+			Port: 3333,
+		})
+		if err != nil {
+			panic(err)
+		}
+		for ; ;  {
+			c1, err := l.Accept()
+			if err != nil {
+				panic(err)
+			}
+			go func() {
+				for ;;{
+					bs:=make([]byte,len(hello1),len(hello1))
+					n,err:=c1.Read(bs)
+					fmt.Println("s r",n,err,string(bs))
+					n,err=c1.Write([]byte(hello2))
+					fmt.Println("s w",n,err)
+					c1.Close()
+					return
+				}
+
+			}()
+		}
+
+	}()
+	go func() {
+		for ;;{
+			go func() {
+				c2, err := Dial(&GAddr{
+					IP:   "192.168.6.6",
+					Port: 3333,
+				})
+				n,err:=c2.Write([]byte(hello1))
+				fmt.Println("c w",n,err)
+				bs:=make([]byte,len(hello2),len(hello2))
+				n,err=c2.Read(bs)
+				fmt.Println("c r",n,err,string(bs))
+				err=c2.Close()
+				return
+			}()
+			time.Sleep(1000*time.Millisecond)
+		}
 	}()
 	time.Sleep(1000*time.Second)
 }

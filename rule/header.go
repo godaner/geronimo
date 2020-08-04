@@ -27,7 +27,7 @@ const (
 )
 
 const (
-	DefSsthresh = DefRecWinSize / 2
+	DefSsthresh = 8
 )
 const (
 	MSS = 1472 - 18 // 1455

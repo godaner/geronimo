@@ -26,12 +26,16 @@ import (
 //
 // index =         0       1       2      3       4       5       6       7        8       9       10
 const (
-	bqSize                     = 10 // n mss
+	readySendMaxSIze           = 10 // n mss
 	quickResendIfAckGEN        = 3
-	clearReadySendInterval     = 100            // ms
-	clearReadySendLongInterval = 1000 * 60 * 60 // ms
-	closeCheckFlushNum         = bqSize * 2     // should ge bq size
-	closeCheckAckNum           = bqSize * 2
+	clearReadySendInterval     = 100                  // ms
+	clearReadySendLongInterval = 1000 * 60 * 60       // ms
+	closeCheckFlushInterval    = 10                   // ms
+	closeCheckFlushNum         = readySendMaxSIze * 2 // should ge bq size
+	closeCheckFlushTO          = 5 * 1000             // ms
+	closeCheckAckTO            = 5 * 1000             // ms
+	closeCheckAckInterval      = 10                   // ms
+	closeCheckAckNum           = readySendMaxSIze * 2
 	closeTimeout               = 1000 * 5 // ms
 )
 const (
@@ -39,7 +43,7 @@ const (
 	rttd_b  = float64(0.25)
 	def_rto = float64(100 * 1e6) // ns
 	def_rtt = float64(100 * 1e6) // ns
-	min_rto = float64(100)       // ns
+	min_rto = float64(10 * 1e6)  // ns
 	max_rto = float64(500 * 1e6) // ns
 )
 
@@ -142,7 +146,7 @@ func (s *SWND) init() {
 		s.rto = def_rto
 		s.rtts = def_rtt
 		s.rttd = def_rtt
-		s.readySend = &ds.BQ{Size: bqSize}
+		s.readySend = &ds.BQ{Size: readySendMaxSIze}
 		s.segResendCancel = &sync.Map{}
 		s.segResendQuick = &sync.Map{}
 		s.cancelResendResult = map[uint32]chan bool{}
@@ -200,12 +204,13 @@ func (s *SWND) send(checkMSS bool) (err error) {
 	for {
 		bs, needFlush := s.readASegment(checkMSS)
 		if needFlush {
-			s.flushTimer.Reset(clearReadySendInterval) // flush after n ms
+			s.flushTimer.Reset(time.Duration(clearReadySendInterval) * time.Millisecond) // flush after n ms
 			s.logger.Debug("SWND : need flush , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
 		} else {
-			s.flushTimer.Reset(clearReadySendLongInterval) // no flush
+			s.flushTimer.Reset(time.Duration(clearReadySendLongInterval) * time.Millisecond) // no flush
 		}
 		if len(bs) <= 0 {
+			// todo ???????
 			s.logger.Debug("SWND : read segment fail , readySend len is", s.readySend.Len(), ", sent len is", s.sentC, ", send win size is", s.sendWinSize, ", cong win size is", s.congWinSize, ", recv win size is", s.recvWinSize, ", rto is", int64(s.rto))
 			return
 		}
@@ -311,12 +316,13 @@ func (s *SWND) readASegment(checkMSS bool) (bs []byte, needFlush bool) {
 	}
 	if checkMSS && s.readySend.Len() < rule.MSS { // no enough data to fill a mss
 		if s.readySend.Len() > 0 {
+			//s.logger.Warning("SWND : readASegment , need flush , readySend len is", s.readySend.Len())
 			return nil, true
 		}
 		return nil, false
 	}
 	bs = make([]byte, rule.MSS, rule.MSS)
-	n := s.readySend.Pop(bs)
+	n := s.readySend.Pop(bs) // todo ?? blockpop ??
 	return bs[:n], false
 }
 
@@ -488,46 +494,8 @@ func (s *SWND) loopFlush() {
 		for {
 			select {
 			case <-s.closeSignal:
-				// send all
-				sn := 0
-				for {
-					if sn > closeCheckFlushNum {
-						s.logger.Error("SWND : stopping flush 1, flush num beynd , flush num is", sn, ", readySend len is", s.readySend.Len())
-						break
-					}
-					s.Lock()
-					s.logger.Debug("SWND : stopping flush 1, ready send is", s.readySend.Len())
-					if s.readySend.Len() <= 0 {
-						s.logger.Debug("SWND : stopping flush 1 finish , ready send is", s.readySend.Len())
-						s.Unlock()
-						break
-					}
-					err := s.send(false) // clear data
-					if err != nil {
-						s.logger.Error("SWND : stopping flush 1 err , ready send is", s.readySend.Len(), ", err is", err)
-						s.Unlock()
-						return
-					}
-					s.Unlock()
-					sn++
-					<-time.After(10 * time.Millisecond)
-
-				}
-				// recv all ack
-				an := 0
-				for {
-					if an > closeCheckAckNum {
-						s.logger.Error("SWND : stopping flush 2, ack num beynd , ack num is", sn)
-						break
-					}
-					s.logger.Debug("SWND : stopping flush 2, sentC is", s.sentC)
-					if s.sentC <= 0 {
-						s.logger.Debug("SWND : stopping flush 2 finish , sentC is", s.sentC)
-						break
-					}
-					an++
-					<-time.After(10 * time.Millisecond)
-				}
+				s.flushLast()
+				s.recvAckLast()
 				return
 			case <-s.flushTimer.C:
 				s.Lock()
@@ -559,4 +527,69 @@ func (s *SWND) Close() (err error) {
 	}
 
 	return nil
+}
+
+// flushLast
+func (s *SWND) flushLast() {
+	ft := time.NewTimer(time.Duration(closeCheckFlushTO) * time.Millisecond)
+	defer ft.Stop()
+	// send all
+	sn := 0
+	for {
+		select {
+		case <-ft.C:
+			s.logger.Error("SWND : flushLast flush timeout , flush num is", sn, ", readySend len is", s.readySend.Len())
+			panic("flush timeout")
+			return
+		case <-time.After(time.Duration(closeCheckFlushInterval) * time.Millisecond):
+			if sn > closeCheckFlushNum {
+				s.logger.Error("SWND : flushLast stopping flush , flush num beynd , flush num is", sn, ", readySend len is", s.readySend.Len())
+				return
+			}
+			s.Lock()
+			s.logger.Debug("SWND : flushLast stopping flush , ready send is", s.readySend.Len())
+			if s.readySend.Len() <= 0 {
+				s.logger.Debug("SWND : flushLast stopping flush finish , ready send is", s.readySend.Len())
+				s.Unlock()
+				return
+			}
+			err := s.send(false) // clear data
+			if err != nil {
+				s.logger.Error("SWND : flushLast stopping flush err , ready send is", s.readySend.Len(), ", err is", err)
+				s.Unlock()
+				return
+			}
+			s.Unlock()
+			sn++
+
+		}
+	}
+}
+
+// recvAckLast
+func (s *SWND) recvAckLast() {
+	at := time.NewTimer(time.Duration(closeCheckAckTO) * time.Millisecond)
+	defer at.Stop()
+	// recv all ack
+	an := 0
+	for {
+		select {
+		case <-at.C:
+			s.logger.Error("SWND : recvAckLast flush timeout , ack num is", an, ", sentC is", s.sentC)
+			panic("flush timeout")
+			return
+		case <-time.After(time.Duration(closeCheckAckInterval) * time.Millisecond):
+			if an > closeCheckAckNum {
+				s.logger.Error("SWND : recvAckLast stopping flush , ack num beynd , ack num is", an)
+				return
+			}
+			s.logger.Debug("SWND : recvAckLast stopping flush , sentC is", s.sentC)
+			if s.sentC <= 0 {
+				s.logger.Debug("SWND : recvAckLast stopping flush finish , sentC is", s.sentC)
+				return
+			}
+			an++
+		}
+
+	}
 }
