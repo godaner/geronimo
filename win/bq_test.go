@@ -1,4 +1,4 @@
-package ds
+package win
 
 import (
 	"fmt"
@@ -21,16 +21,16 @@ func TestBQ_Len(t *testing.T) {
 
 }
 func TestByteBlockChan_Push(t *testing.T) {
-	b:=&BQ{Size: 10}
-	b.Push([]byte("zhang")...)
-	b.Push([]byte("zhang")...)
+	b:=&bq{Size: 10}
+	b.BlockPush([]byte("zhang")...)
+	b.BlockPush([]byte("zhang")...)
 	go func() {
 		time.Sleep(2*time.Second)
 		bs:=make([]byte,5,5)
 		n:=b.Pop(bs)
 		fmt.Println(string(bs[:n]))
 	}()
-	b.Push([]byte("zhang")...)
+	b.BlockPush([]byte("zhang")...)
 	fmt.Println(b.Len())
 	go func() {
 		time.Sleep(2*time.Second)
@@ -38,7 +38,7 @@ func TestByteBlockChan_Push(t *testing.T) {
 		n:=b.Pop(bs)
 		fmt.Println(string(bs[:n]))
 	}()
-	b.Push([]byte("zhang")...)
+	b.BlockPush([]byte("zhang")...)
 	fmt.Println(b.Len())
 
 }
@@ -78,17 +78,17 @@ func TestByteBlockChan_PopWithStop(t *testing.T) {
 	//io.ReadFull()
 }
 func TestByteBlockChan_Pop(t *testing.T) {
-	b:=&BQ{Size: 10}
+	b:=&bq{Size: 10}
 	bs:=make([]byte,5,5)
 	go func() {
 		time.Sleep(2*time.Second)
-		b.Push([]byte("zhang")...)
+		b.BlockPush([]byte("zhang")...)
 	}()
 	n:=b.Pop(bs)
 	fmt.Println(string(bs[:n]),b.Len())
 	go func() {
 		time.Sleep(2*time.Second)
-		b.Push([]byte("zhang")...)
+		b.BlockPush([]byte("zhang")...)
 	}()
 	n=b.Pop(bs)
 	fmt.Println(string(bs[:n]),b.Len())

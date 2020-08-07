@@ -1,4 +1,4 @@
-package v1
+package win
 
 import (
 	"fmt"
@@ -26,16 +26,16 @@ func TestRWND_ReadFull(t *testing.T) {
 			fmt.Println(string(bs),n)
 		}
 	}()
-	rwnd.RecvSegment(4, []byte("dasb"))
+	rwnd.Recv(4, []byte("dasb"))
 	time.Sleep(1 * time.Second)
-	rwnd.RecvSegment(0, []byte("this"))
+	rwnd.Recv(0, []byte("this"))
 	time.Sleep(1 * time.Second)
-	rwnd.RecvSegment(8, []byte("zhan"))
+	rwnd.Recv(8, []byte("zhan"))
 	time.Sleep(1 * time.Second)
-	rwnd.RecvSegment(12, []byte("6666"))
+	rwnd.Recv(12, []byte("6666"))
 	time.Sleep(1 * time.Second)
-	rwnd.RecvSegment(0, []byte("7777"))
+	rwnd.Recv(0, []byte("7777"))
 	time.Sleep(1 * time.Second)
-	rwnd.RecvSegment(4, []byte("8888"))
+	rwnd.Recv(4, []byte("8888"))
 	time.Sleep(1000 * time.Second)
 }

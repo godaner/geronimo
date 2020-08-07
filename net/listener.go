@@ -1,4 +1,4 @@
-package v1
+package net
 
 import (
 	"errors"
@@ -8,6 +8,7 @@ import (
 	v1 "github.com/godaner/geronimo/rule/v1"
 	"net"
 	"sync"
+	"time"
 )
 
 const (
@@ -101,7 +102,12 @@ func (g *GListener) init() {
 					g.logger.Debug("GListener#init : recv msg from", rAddr.String(), ", msg flag is ", m1.Flag())
 					msgI, _ := g.msgs.Load(rAddr.String())
 					msg := msgI.(chan *v1.Message)
-					msg <- m1
+					select {
+					case msg <- m1:
+						return
+					case <-time.After(time.Duration(1) * time.Second):
+						panic("send msg timeout")
+					}
 				}()
 			}
 		}()

@@ -9,8 +9,8 @@ import (
 
 // Header
 type Header struct {
-	HSeqN    uint32
-	HAckN    uint32
+	HSeqN    uint16
+	HAckN    uint16
 	HFlag    uint16
 	HWinSize uint16
 	HAttrNum byte
@@ -24,11 +24,11 @@ func (h *Header) AttrNum() byte {
 	return h.HAttrNum
 }
 
-func (h *Header) AckN() uint32 {
+func (h *Header) AckN() uint16 {
 	return h.HAckN
 }
 
-func (h *Header) SeqN() uint32 {
+func (h *Header) SeqN() uint16 {
 	return h.HSeqN
 }
 
@@ -62,11 +62,11 @@ type Message struct {
 	AttrMaps map[byte][]byte
 }
 
-func (m *Message) SeqN() uint32 {
+func (m *Message) SeqN() uint16 {
 	return m.Header.SeqN()
 }
 
-func (m *Message) AckN() uint32 {
+func (m *Message) AckN() uint16 {
 	return m.Header.AckN()
 }
 
@@ -94,37 +94,37 @@ func (m *Message) Marshall() []byte {
 	var err error
 	err = binary.Write(buf, binary.BigEndian, m.Header.HSeqN)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.RecvSegment m.Header.HSeqN err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Recv m.Header.HSeqN err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HAckN)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.RecvSegment m.Header.HAckN err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Recv m.Header.HAckN err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HFlag)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.RecvSegment m.Header.HFlag err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Recv m.Header.HFlag err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HWinSize)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.RecvSegment m.Header.HWinSize err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Recv m.Header.HWinSize err , err is : %v !", err.Error())
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HAttrNum)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.RecvSegment m.Header.AttrNum err , err is : %v !", err.Error())
+		log.Printf("Message#Marshall : binary.Recv m.Header.AttrNum err , err is : %v !", err.Error())
 	}
 	for _, v := range m.Attr {
 		err = binary.Write(buf, binary.BigEndian, v.AT)
 		if err != nil {
-			log.Printf("Message#Marshall : binary.RecvSegment m.Header.AttrType err , err is : %v !", err.Error())
+			log.Printf("Message#Marshall : binary.Recv m.Header.AttrType err , err is : %v !", err.Error())
 		}
 		//be careful
 		err = binary.Write(buf, binary.BigEndian, v.AL+3)
 		if err != nil {
-			log.Printf("Message#Marshall : binary.RecvSegment m.Header.AttrLen err , err is : %v !", err.Error())
+			log.Printf("Message#Marshall : binary.Recv m.Header.AttrLen err , err is : %v !", err.Error())
 		}
 		err = binary.Write(buf, binary.BigEndian, v.AV)
 		if err != nil {
-			log.Printf("Message#Marshall : binary.RecvSegment m.Header.AttrStr err , err is : %v !", err.Error())
+			log.Printf("Message#Marshall : binary.Recv m.Header.AttrStr err , err is : %v !", err.Error())
 		}
 	}
 	return buf.Bytes()
@@ -179,37 +179,37 @@ func (m *Message) UnMarshall(message []byte) (err error) {
 	return nil
 }
 
-func (m *Message) SYN1(seqN uint32) {
+func (m *Message) SYN1(seqN uint16) {
 	m.newMessage(rule.FlagSYN1, seqN, 0, 0)
 }
 
-func (m *Message) SYN2(seqN, ackN uint32) {
+func (m *Message) SYN2(seqN, ackN uint16) {
 	m.newMessage(rule.FlagSYN2, seqN, ackN, 0)
 }
 
-func (m *Message) SYN3(seqN, ackN uint32) {
+func (m *Message) SYN3(seqN, ackN uint16) {
 	m.newMessage(rule.FlagSYN3, seqN, ackN, 0)
 }
 
-func (m *Message) FIN1(seqN uint32) {
+func (m *Message) FIN1(seqN uint16) {
 	m.newMessage(rule.FlagFIN1, seqN, 0, 0)
 }
 
-func (m *Message) FIN2(seqN, ackN uint32) {
+func (m *Message) FIN2(seqN, ackN uint16) {
 	m.newMessage(rule.FlagFIN2, seqN, ackN, 0)
 }
 
-func (m *Message) FIN3(seqN, ackN uint32) {
+func (m *Message) FIN3(seqN, ackN uint16) {
 	m.newMessage(rule.FlagFIN3, seqN, ackN, 0)
 }
 
-func (m *Message) FIN4(seqN, ackN uint32) {
+func (m *Message) FIN4(seqN, ackN uint16) {
 	m.newMessage(rule.FlagFIN4, seqN, ackN, 0)
 }
-func (m *Message) ACK(ackN uint32, winSize uint16) {
-	m.newMessage(rule.FlagACK, 0, ackN, winSize)
+func (m *Message) ACK(seqN, ackN, winSize uint16) {
+	m.newMessage(rule.FlagACK, seqN, ackN, winSize)
 }
-func (m *Message) PAYLOAD(seqN uint32, payload []byte) {
+func (m *Message) PAYLOAD(seqN uint16, payload []byte) {
 	m.newMessage(rule.FlagPAYLOAD, seqN, 0, 0)
 	m.Attr = []Attr{
 		{
@@ -218,7 +218,7 @@ func (m *Message) PAYLOAD(seqN uint32, payload []byte) {
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
-func (m *Message) newMessage(flag uint16, seqN, ackN uint32, winSize uint16) {
+func (m *Message) newMessage(flag, seqN, ackN uint16, winSize uint16) {
 	m.Header = Header{
 		HFlag:    flag,
 		HSeqN:    seqN,

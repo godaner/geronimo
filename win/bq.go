@@ -1,22 +1,21 @@
-package ds
+package win
 
 import (
 	"bytes"
 	"errors"
-	"github.com/godaner/geronimo/rule"
 	"sync"
 	"time"
 )
 
 const (
-	defSize = 10 * rule.MSS
+	defSize = 10 * mss
 )
 
 var (
 	ErrStoped = errors.New("stoped")
 )
 
-type BQ struct {
+type bq struct {
 	sync.Once
 	sync.RWMutex
 	bs         []byte
@@ -26,7 +25,7 @@ type BQ struct {
 	Size       uint32
 }
 
-func (b *BQ) init() {
+func (b *bq) init() {
 	b.Do(func() {
 		b.bs = make([]byte, 0)
 		b.readBlock = make(chan bool, 0)
@@ -39,7 +38,7 @@ func (b *BQ) init() {
 }
 
 // Len
-func (b *BQ) Len() uint32 {
+func (b *bq) Len() uint32 {
 	b.init()
 	b.RLock()
 	defer b.RUnlock()
@@ -47,13 +46,13 @@ func (b *BQ) Len() uint32 {
 }
 
 // Pop
-func (b *BQ) Pop(byt []byte) (nn uint32) {
+func (b *bq) Pop(byt []byte) (nn uint32) {
 	b.init()
 	return b.pop(byt)
 }
 
 // BlockPop
-func (b *BQ) BlockPop(byt []byte) (nn uint32) {
+func (b *bq) BlockPop(byt []byte) (nn uint32) {
 	b.init()
 	select {
 	case <-b.readBlock:
@@ -64,7 +63,7 @@ func (b *BQ) BlockPop(byt []byte) (nn uint32) {
 }
 
 // BlockPopWithStop
-func (b *BQ) BlockPopWithStop(byt []byte, stop chan bool) (nn uint32, err error) {
+func (b *bq) BlockPopWithStop(byt []byte, stop chan struct{}) (nn uint32, err error) {
 	b.init()
 	select {
 	case <-b.readBlock:
@@ -75,8 +74,10 @@ func (b *BQ) BlockPopWithStop(byt []byte, stop chan bool) (nn uint32, err error)
 
 }
 
-//   Push
-func (b *BQ) Push(byt ...byte) {
+type pushEvent func()
+
+// BlockPush
+func (b *bq) BlockPush(e pushEvent, byt ...byte) {
 	b.init()
 	for {
 		bl := uint32(len(byt))
@@ -84,11 +85,14 @@ func (b *BQ) Push(byt ...byte) {
 			return
 		}
 		byt = b.push(byt...)
+		if e != nil {
+			e()
+		}
 	}
 }
 
 // push
-func (b *BQ) push(byt ...byte) (rest []byte) {
+func (b *bq) push(byt ...byte) (rest []byte) {
 	select {
 	case <-b.writeBlock:
 		b.Lock()
@@ -125,7 +129,7 @@ func (b *BQ) push(byt ...byte) (rest []byte) {
 }
 
 // pop
-func (b *BQ) pop(byt []byte) (nn uint32) {
+func (b *bq) pop(byt []byte) (nn uint32) {
 	b.Lock()
 	defer b.Unlock()
 	l := uint32(len(b.bs))

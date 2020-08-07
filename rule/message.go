@@ -18,8 +18,8 @@ type Message interface {
 	PAYLOAD(seqN uint32, payload []byte)
 
 	// from head
-	SeqN() uint32
-	AckN() uint32
+	SeqN() uint16
+	AckN() uint16
 	Flag() uint16
 	WinSize() uint16
 	AttrNum() byte
