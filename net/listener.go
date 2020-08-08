@@ -8,7 +8,6 @@ import (
 	v1 "github.com/godaner/geronimo/rule/v1"
 	"net"
 	"sync"
-	"time"
 )
 
 const (
@@ -104,9 +103,9 @@ func (g *GListener) init() {
 					msg := msgI.(chan *v1.Message)
 					select {
 					case msg <- m1:
-						return
-					case <-time.After(time.Duration(1) * time.Second):
-						panic("send msg timeout")
+						//return
+					//case <-time.After(time.Duration(1) * time.Second):
+					//	panic("send msg timeout")
 					}
 				}()
 			}
@@ -126,7 +125,12 @@ func (g *GListener) rmGConn(addr interface{}) {
 		return
 	}
 	cs := csI.(chan bool)
-	close(cs)
+	select {
+	case <-cs:
+		return
+	default:
+		close(cs)
+	}
 	g.closes.Delete(addr)
 
 }

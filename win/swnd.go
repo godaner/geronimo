@@ -30,7 +30,7 @@ const (
 
 const (
 	defCongWinSize = 1
-	defRecWinSize  = 4096
+	defRecWinSize  = 32
 )
 
 const (
@@ -47,8 +47,8 @@ const (
 	rtts_a   = float64(0.125)
 	rttd_b   = float64(0.25)
 	min_rto  = time.Duration(1) * time.Nanosecond
-	max_rto  = time.Duration(120) * time.Second
-	def_rto  = time.Duration(500) * time.Millisecond
+	max_rto  = time.Duration(500) * time.Millisecond
+	def_rto  = time.Duration(100) * time.Millisecond
 	def_rtts = def_rto
 	def_rttd = def_rto
 )
@@ -117,15 +117,15 @@ func (s *SWND) Write(bs []byte) (err error) {
 	default:
 	}
 	s.logger.Info("SWND : write appBuffer , len is", len(bs), ", appBuffer len is", s.appBuffer.Len(), ", sent len is", s.sentC, ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd)
-	r := make(chan struct{})
-	go func() { // test
-		select {
-		case <-r:
-			return
-		case <-time.After(time.Duration(10) * time.Second):
-			panic("Write push timeout , tag is : " + s.FTag + " , appBuffer len is : " + fmt.Sprint(s.appBuffer.Len()))
-		}
-	}()
+	//r := make(chan struct{})
+	//go func() { // test
+	//	select {
+	//	case <-r:
+	//		return
+	//	case <-time.After(time.Duration(10) * time.Second):
+	//		panic("Write push timeout , tag is : " + s.FTag + " , appBuffer len is : " + fmt.Sprint(s.appBuffer.Len()))
+	//	}
+	//}()
 	s.appBuffer.BlockPush(func() {
 		s.Lock()
 		defer s.Unlock()
@@ -135,7 +135,7 @@ func (s *SWND) Write(bs []byte) (err error) {
 			return
 		}
 	}, bs...)
-	close(r) // test
+	//close(r) // test
 	return nil
 }
 

@@ -7,7 +7,6 @@ import (
 	gologging "github.com/godaner/geronimo/logger/go-logging"
 	"io"
 	"sync"
-	"time"
 )
 
 // The Receive-Window is as follow :
@@ -121,18 +120,18 @@ func (r *RWND) recved2AppBuffer() (breakk bool) {
 	if seg == nil {
 		return true
 	}
-	rr := make(chan struct{})
-	go func() { // test
-		select {
-		case <-rr:
-			return
-		case <-time.After(time.Duration(3) * time.Second):
-			panic("recved2AppBuffer push timeout , tag is : " + r.FTag + " , appBuffer len is : " + fmt.Sprint(r.appBuffer.Len()))
-		}
-	}()
+	//rr := make(chan struct{})
+	//go func() { // test
+	//	select {
+	//	case <-rr:
+	//		return
+	//	case <-time.After(time.Duration(10) * time.Second):
+	//		panic("recved2AppBuffer push timeout , tag is : " + r.FTag + " , appBuffer len is : " + fmt.Sprint(r.appBuffer.Len()))
+	//	}
+	//}()
 	// put segment data to application buffer
 	r.appBuffer.BlockPush(nil, seg.bs...)
-	close(rr)
+	//close(rr)
 	// delete segment
 	r.recved[r.tailSeq] = nil
 	// slide window , next seq
