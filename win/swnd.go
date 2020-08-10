@@ -47,8 +47,8 @@ const (
 	rtts_a   = float64(0.125)
 	rttd_b   = float64(0.25)
 	min_rto  = time.Duration(1) * time.Nanosecond
-	max_rto  = time.Duration(500) * time.Millisecond
-	def_rto  = time.Duration(100) * time.Millisecond
+	max_rto  = time.Duration(50) * time.Millisecond
+	def_rto  = time.Duration(10) * time.Millisecond
 	def_rtts = def_rto
 	def_rttd = def_rto
 )
@@ -182,11 +182,11 @@ func (s *SWND) RecvAck(seq, ack, winSize uint16) (err error) {
 func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 	switch e {
 	case EventFinish:
-		if s.ssthresh <= s.cwnd {
-			s.cwnd += 1
-		} else {
-			s.cwnd *= 2 // slow start
-		}
+		//if s.ssthresh <= s.cwnd {
+			s.cwnd *= 2
+		//} else {
+		//	s.cwnd *= 2 // slow start
+		//}
 		if s.cwnd > defRecWinSize {
 			s.cwnd = defRecWinSize
 		}
@@ -195,13 +195,21 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		s.logger.Info("SWND : segment finish rttm is", ec.rttm, ", rto is", s.rto)
 		return nil
 	case EventQResend:
-		s.ssthresh = s.cwnd / 2
-		s.cwnd = s.ssthresh
-		s.comSendWinSize()
+		//s.ssthresh = s.cwnd / 2
+		//s.cwnd = s.ssthresh
+		//s.cwnd--
+		//if s.cwnd<=0{
+		//	s.cwnd=1
+		//}
+		//s.comSendWinSize()
 		return nil
 	case EventResend:
-		s.ssthresh = s.cwnd / 2
-		s.cwnd = 1
+		//s.ssthresh = s.cwnd / 2
+		//s.cwnd = 1
+		s.cwnd--
+		if s.cwnd<=0{
+			s.cwnd=1
+		}
 		s.comSendWinSize()
 		return nil
 	}
