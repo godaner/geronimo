@@ -47,8 +47,8 @@ const (
 	rtts_a   = float64(0.125)
 	rttd_b   = float64(0.25)
 	min_rto  = time.Duration(1) * time.Nanosecond
-	max_rto  = time.Duration(50) * time.Millisecond
-	def_rto  = time.Duration(10) * time.Millisecond
+	max_rto  = time.Duration(40) * time.Millisecond
+	def_rto  = time.Duration(5) * time.Millisecond
 	def_rtts = def_rto
 	def_rttd = def_rto
 )
