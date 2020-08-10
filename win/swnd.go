@@ -270,9 +270,13 @@ func (s *SWND) readMSS() (seg *segment) {
 		s.flushTimer.Reset(clearReadySendInterval) // flush after n ms
 		return nil
 	}
-	s.flushTimer.Reset(clearReadySendLongInterval) // no flush
 	bs := make([]byte, mss, mss)
 	n := s.appBuffer.BlockPop(bs) // todo ?? blockpop ??
+	if s.appBuffer.Len() > 0 { // rest data wait to flush
+		s.flushTimer.Reset(clearReadySendInterval) // flush after n ms
+	} else {
+		s.flushTimer.Reset(clearReadySendLongInterval) // no flush
+	}
 	bs = bs[:n]
 	if len(bs) <= 0 {
 		return nil
