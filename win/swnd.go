@@ -89,16 +89,18 @@ func init() {
 type SWND struct {
 	sync.Once
 	sync.RWMutex
-	appBuffer       *bq         // from app , wait for send
-	sentC           int64       // sent segment count
-	sent            []*segment  // sent segments
-	flushTimer      *time.Timer // loopFlush not send data
-	swnd            int64       // send window size , swnd = min(cwnd,rwnd)
-	cwnd            int64       // congestion window size
-	rwnd            int64       // receive window size
-	hSeq            uint16      // current head seq , location is head
-	tSeq            uint16      // current tail seq , location is tail
-	ssthresh        int64       // ssthresh
+	writeLock sync.RWMutex
+	appBuffer *bq // from app , wait for send
+	//sentC           int64       // sent segment count
+	//sent            []*segment  // sent segments
+	sent            map[uint16]*segment // sent segments
+	flushTimer      *time.Timer         // loopFlush not send data
+	swnd            int64               // send window size , swnd = min(cwnd,rwnd)
+	cwnd            int64               // congestion window size
+	rwnd            int64               // receive window size
+	hSeq            uint16              // current head seq , location is head
+	tSeq            uint16              // current tail seq , location is tail
+	ssthresh        int64               // ssthresh
 	rttd, rtts, rto time.Duration
 	closeSignal     chan bool
 	sendFinish      chan bool
@@ -110,13 +112,15 @@ type SWND struct {
 // Write
 func (s *SWND) Write(bs []byte) (err error) {
 	s.init()
+	s.writeLock.Lock()
+	defer s.writeLock.Unlock()
 	select {
 	case <-s.closeSignal:
 		s.logger.Warning("SWND : window is closed")
 		return ErrSWNDClosed
 	default:
 	}
-	s.logger.Info("SWND : write appBuffer , len is", len(bs), ", appBuffer len is", s.appBuffer.Len(), ", sent len is", s.sentC, ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd)
+	s.logger.Info("SWND : write appBuffer , len is", len(bs), ", appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd)
 	//r := make(chan struct{})
 	//go func() { // test
 	//	select {
@@ -145,7 +149,7 @@ func (s *SWND) RecvAck(seq, ack, winSize uint16) (err error) {
 	s.Lock()
 	defer s.Unlock()
 	//s.logger.Info("SWND : recv seq is", seq, ", ack is [", ack, "]")
-	s.logger.Info("SWND : recv ack , seq is", seq, ", ack is [", ack, "] , appBuffer len is", s.appBuffer.Len(), ", sent len is", s.sentC, ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd)
+	s.logger.Info("SWND : recv ack , seq is", seq, ", ack is [", ack, "] , appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd)
 	// ack segment
 	seg := s.sent[seq]
 	if seg != nil {
@@ -228,7 +232,7 @@ func (s *SWND) init() {
 		s.tSeq = minSeqN
 		s.hSeq = s.tSeq
 		s.appBuffer = &bq{Size: appBufferSize}
-		s.sent = make([]*segment, uint32(maxSeqN)+1) // index [0,65535]
+		s.sent = make(map[uint16]*segment)
 		s.flushTimer = time.NewTimer(clearReadySendInterval)
 		s.closeSignal = make(chan bool)
 		s.sendFinish = make(chan bool)
@@ -237,15 +241,15 @@ func (s *SWND) init() {
 }
 func (s *SWND) trimAckSeg() {
 	defer func() {
-		s.logger.Info("SWND : trimAckSeg , sent len is", s.sentC)
+		s.logger.Info("SWND : trimAckSeg , sent len is", len(s.sent))
 	}()
 	for {
 		seg := s.sent[s.hSeq]
 		if seg == nil || !seg.IsAck() {
 			return
 		}
-		s.sent[s.hSeq] = nil
-		s.sentC--
+		delete(s.sent, s.hSeq)
+		seg = nil
 		s.hSeq++
 	}
 }
@@ -259,7 +263,7 @@ func (s *SWND) readMSS() (seg *segment) {
 	if s.appBuffer.Len() <= 0 {
 		return nil
 	}
-	if s.swnd-s.sentC <= 0 { // no enough win size to send todo
+	if s.swnd-int64(len(s.sent)) <= 0 { // no enough win size to send todo
 		return nil
 	}
 	if s.appBuffer.Len() < mss { // no enough data to fill a mss
@@ -273,7 +277,7 @@ func (s *SWND) readMSS() (seg *segment) {
 	if len(bs) <= 0 {
 		return nil
 	}
-	return newSegment(s.logger, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
+	return newSSegment(s.logger, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
 }
 
 // readAny
@@ -288,7 +292,7 @@ func (s *SWND) readAny() (seg *segment) {
 	if len(bs) <= 0 {
 		return nil
 	}
-	return newSegment(s.logger, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
+	return newSSegment(s.logger, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
 }
 
 // send
@@ -300,12 +304,10 @@ func (s *SWND) send(sr segmentReader) (err error) {
 		}
 		// put it to queue
 		s.sent[s.tSeq] = seg
-		// add sent count
-		s.sentC++
 		// inc seq
 		s.tSeq++
 		// send
-		s.logger.Info("SWND : segment send , seq is [", seg.Seq(), "] , segment len is", len(seg.Bs()), ", appBuffer len is", s.appBuffer.Len(), ", sent len is", s.sentC, ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd, ", rto is", int64(s.rto))
+		s.logger.Info("SWND : segment send , seq is [", seg.Seq(), "] , segment len is", len(seg.Bs()), ", appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd, ", rto is", int64(s.rto))
 		err := seg.Send()
 		if err != nil {
 			return err
@@ -330,7 +332,7 @@ func (s *SWND) loopFlush() {
 				return
 			case <-s.flushTimer.C:
 				s.Lock()
-				s.logger.Debug("SWND : flushing , appBuffer len is", s.appBuffer.Len(), ", sent len is", s.sentC, ", send win size is", s.swnd, ", recv win size is", s.rwnd, ", cong win size is", s.cwnd, ", rto is", int64(s.rto))
+				s.logger.Debug("SWND : flushing , appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", recv win size is", s.rwnd, ", cong win size is", s.cwnd, ", rto is", int64(s.rto))
 				err := s.send(s.readAny)
 				if err != nil {
 					s.logger.Debug("SWND : flushing err , err is", err)
@@ -419,7 +421,7 @@ func (s *SWND) waitLastAck() {
 	for {
 		select {
 		case <-at.C:
-			s.logger.Error("SWND : waitLastAck flush timeout , ack num is", an, ", sentC is", s.sentC)
+			s.logger.Error("SWND : waitLastAck flush timeout , ack num is", an, ", sentC is", len(s.sent))
 			//panic("flush timeout")
 			return
 		case <-time.After(closeCheckAckInterval):
@@ -427,9 +429,9 @@ func (s *SWND) waitLastAck() {
 				s.logger.Error("SWND : waitLastAck stopping flush , ack num beynd , ack num is", an)
 				return
 			}
-			s.logger.Info("SWND : waitLastAck stopping flush , sentC is", s.sentC)
-			if s.sentC <= 0 {
-				s.logger.Info("SWND : waitLastAck stopping flush finish , sentC is", s.sentC)
+			s.logger.Info("SWND : waitLastAck stopping flush , sentC is", len(s.sent))
+			if len(s.sent) <= 0 {
+				s.logger.Info("SWND : waitLastAck stopping flush finish , sentC is", len(s.sent))
 				return
 			}
 			an++

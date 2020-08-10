@@ -33,9 +33,10 @@ type AckSender func(seqN, ack, receiveWinSize uint16) (err error)
 type RWND struct {
 	sync.Mutex
 	sync.Once
-	appBuffer   *bq         // to app
-	recved      []*rSegment // received segment
-	tailSeq     uint16      // current tail seq , location is tail
+	readLock    sync.RWMutex
+	appBuffer   *bq                 // to app
+	recved      map[uint16]*segment // received segment
+	tailSeq     uint16              // current tail seq , location is tail
 	closeSignal chan struct{}
 	logger      logger.Logger
 	AckSender   AckSender
@@ -45,6 +46,8 @@ type RWND struct {
 // Read
 func (r *RWND) Read(bs []byte) (n int, err error) {
 	r.init()
+	r.readLock.Lock()
+	defer r.readLock.Unlock()
 	select {
 	case <-r.closeSignal:
 		return 0, io.EOF
@@ -94,13 +97,13 @@ func (r *RWND) init() {
 		r.logger = gologging.GetLogger(r.String())
 		r.tailSeq = minSeqN
 		r.appBuffer = &bq{Size: appBufferSize}
-		r.recved = make([]*rSegment, uint32(maxSeqN)+1)
+		r.recved = make(map[uint16]*segment)
 		r.closeSignal = make(chan struct{})
 	})
 }
 
 // recv
-func (r *RWND) recv(rs *rSegment) {
+func (r *RWND) recv(rs *segment) {
 	defer func() {
 		r.ack(rs.seq, nil)
 	}()
@@ -133,7 +136,8 @@ func (r *RWND) recved2AppBuffer() (breakk bool) {
 	r.appBuffer.BlockPush(nil, seg.bs...)
 	//close(rr)
 	// delete segment
-	r.recved[r.tailSeq] = nil
+	delete(r.recved, r.tailSeq)
+	seg = nil
 	// slide window , next seq
 	r.tailSeq++
 	return false

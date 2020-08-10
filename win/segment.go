@@ -51,8 +51,8 @@ type segment struct {
 	ss     SegmentSender // ss
 }
 
-// newSegment
-func newSegment(logger logger.Logger, seq uint16, bs []byte, rto time.Duration, es eventSender, sender SegmentSender) (s *segment) {
+// newSSegment
+func newSSegment(logger logger.Logger, seq uint16, bs []byte, rto time.Duration, es eventSender, sender SegmentSender) (s *segment) {
 	return &segment{
 		rto:    rto,
 		bs:     bs,
@@ -70,6 +70,13 @@ func newSegment(logger logger.Logger, seq uint16, bs []byte, rto time.Duration, 
 			s.logger.Info("segment : send , seq is [", seq, "] , rto is", s.rto)
 			return sender(seq, bs)
 		},
+	}
+}
+// newRSegment
+func newRSegment(seqN uint16, bs []byte) (rs *segment) {
+	return &segment{
+		seq: seqN,
+		bs:  bs,
 	}
 }
 func (s *segment) Bs() (bs []byte) {
