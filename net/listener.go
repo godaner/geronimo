@@ -27,6 +27,8 @@ func Listen(addr *GAddr) (l net.Listener, err error) {
 }
 
 type GListener struct {
+	rmConnLock sync.RWMutex
+	closeLock  sync.RWMutex
 	sync.Once
 	laddr        *GAddr
 	c            *net.UDPConn
@@ -100,12 +102,16 @@ func (g *GListener) init() {
 					}
 					g.logger.Debug("GListener#init : recv msg from", rAddr.String(), ", msg flag is ", m1.Flag())
 					msgI, _ := g.msgs.Load(rAddr.String())
-					msg := msgI.(chan *v1.Message)
+					msg, ok := msgI.(chan *v1.Message)
+					if !ok {
+						g.logger.Error("GListener#init : msg chan is close")
+						return
+					}
 					select {
 					case msg <- m1:
 						//return
-					//case <-time.After(time.Duration(1) * time.Second):
-					//	panic("send msg timeout")
+						//case <-time.After(time.Duration(1) * time.Second):
+						//	panic("send msg timeout")
 					}
 				}()
 			}
@@ -113,8 +119,11 @@ func (g *GListener) init() {
 	})
 }
 
-// rmGConn
-func (g *GListener) rmGConn(addr interface{}) {
+// RmGConn
+func (g *GListener) RmGConn(addr interface{}) {
+	g.init()
+	g.rmConnLock.Lock()
+	defer g.rmConnLock.Unlock()
 	if g == nil {
 		return
 	}
@@ -145,6 +154,8 @@ func (g *GListener) Accept() (c net.Conn, err error) {
 
 func (g *GListener) Close() error {
 	g.init()
+	g.closeLock.Lock()
+	defer g.closeLock.Unlock()
 	select {
 	case <-g.closeSignal:
 	default:
@@ -153,7 +164,6 @@ func (g *GListener) Close() error {
 	g.gcs.Range(func(key, value interface{}) bool {
 		c := value.(*GConn)
 		c.Close()
-		g.rmGConn(key)
 		return true
 	})
 	return nil

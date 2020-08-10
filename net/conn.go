@@ -261,7 +261,7 @@ func (g *GConn) closeUDPConn() {
 		g.UDPConn.Close()
 	}
 	if g.f == FListen {
-		g.lis.rmGConn(g.raddr.toUDPAddr().String())
+		g.lis.RmGConn(g.raddr.toUDPAddr().String())
 	}
 }
 func (g *GConn) closeRecvWin() (err error) {

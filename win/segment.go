@@ -117,11 +117,13 @@ func (s *segment) AckIi() (err error) {
 		select {
 		case <-s.fsr:
 			return
-		case <-time.After(time.Duration(100) * time.Millisecond):
+		case <-time.After(time.Duration(10000) * time.Millisecond):
 			panic("wait ack segment result timeout")
+			//return errors.New("wait ack segment result timeout")
 		}
-	case <-time.After(time.Duration(100) * time.Millisecond):
-		panic("Send ack segment signal timeout")
+	case <-time.After(time.Duration(10000) * time.Millisecond):
+		panic("send ack segment signal timeout")
+		//return errors.New("send ack segment signal timeout")
 	}
 }
 
