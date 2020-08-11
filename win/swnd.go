@@ -29,8 +29,10 @@ const (
 )
 
 const (
-	defCongWinSize = 1
-	defRecWinSize  = 32
+	defCongWinSize   = 1
+	defRecWinSize    = 32
+	obDefCongWinSize = 32
+	obDefRecWinSize  = 128
 )
 
 const (
@@ -49,7 +51,7 @@ const (
 	min_rto    = time.Duration(1) * time.Nanosecond
 	max_rto    = time.Duration(500) * time.Millisecond
 	def_rto    = time.Duration(100) * time.Millisecond
-	ob_max_rto = time.Duration(40) * time.Millisecond
+	ob_max_rto = time.Duration(50) * time.Millisecond
 	ob_def_rto = time.Duration(5) * time.Millisecond
 )
 const (
@@ -81,8 +83,14 @@ func init() {
 	if defCongWinSize > defRecWinSize {
 		panic("defCongWinSize > defRecWinSize")
 	}
+	if obDefCongWinSize > obDefRecWinSize {
+		panic("obDefCongWinSize > obDefRecWinSize")
+	}
 	if max_rto <= min_rto {
 		panic("max_rto <= min_rto")
+	}
+	if ob_max_rto <= min_rto {
+		panic("ob_max_rto <= min_rto")
 	}
 }
 
@@ -174,15 +182,18 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		switch s.OverBose {
 		case true:
 			s.cwnd *= 2
+			if s.cwnd > obDefRecWinSize {
+				s.cwnd = obDefRecWinSize
+			}
 		case false:
 			if s.ssthresh <= s.cwnd {
 				s.cwnd += 1 // avoid cong
 			} else {
 				s.cwnd *= 2 // slow start
 			}
-		}
-		if s.cwnd > defRecWinSize {
-			s.cwnd = defRecWinSize
+			if s.cwnd > defRecWinSize {
+				s.cwnd = defRecWinSize
+			}
 		}
 		s.comSendWinSize()
 		s.comRTO(float64(ec.rttm))
@@ -229,8 +240,6 @@ func (s *SWND) init() {
 		}
 		s.logger = gologging.GetLogger(s.String())
 		s.ssthresh = defSsthresh
-		s.rwnd = defRecWinSize
-		s.cwnd = defCongWinSize
 		s.swnd = s.cwnd
 		s.tSeq = minSeqN
 		s.hSeq = s.tSeq
@@ -244,10 +253,14 @@ func (s *SWND) init() {
 			s.rto = ob_def_rto
 			s.rtts = ob_def_rto
 			s.rttd = ob_def_rto
+			s.rwnd = obDefRecWinSize
+			s.cwnd = obDefCongWinSize
 		case false:
 			s.rto = def_rto
 			s.rtts = def_rto
 			s.rttd = def_rto
+			s.rwnd = defRecWinSize
+			s.cwnd = defCongWinSize
 		}
 		s.loopFlush()
 	})

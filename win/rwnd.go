@@ -33,6 +33,8 @@ type AckSender func(seqN, ack, receiveWinSize uint16) (err error)
 type RWND struct {
 	sync.Mutex
 	sync.Once
+	OverBose    bool
+	rwnd        int64
 	readLock    sync.RWMutex
 	appBuffer   *bq                 // to app
 	recved      map[uint16]*segment // received segment
@@ -99,6 +101,12 @@ func (r *RWND) init() {
 		r.appBuffer = &bq{Size: appBufferSize}
 		r.recved = make(map[uint16]*segment)
 		r.closeSignal = make(chan struct{})
+		switch r.OverBose {
+		case true:
+			r.rwnd = obDefRecWinSize
+		case false:
+			r.rwnd = defRecWinSize
+		}
 	})
 }
 
@@ -161,7 +169,7 @@ func (r *RWND) ack(seqN uint16, ackN *uint16) {
 // legalSeqN
 func (r *RWND) legalSeqN(seqN uint16) (yes bool) {
 	tailSeq := r.tailSeq
-	for i := 0; i < defRecWinSize; i++ {
+	for i := int64(0); i < r.rwnd; i++ {
 		if seqN == tailSeq { // legal
 			return true
 		}

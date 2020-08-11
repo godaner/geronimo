@@ -197,7 +197,8 @@ func (g *GConn) initWin() {
 func (g *GConn) initRecvWin() {
 	g.initRecvWinOnce.Do(func() {
 		g.recvWin = &win.RWND{
-			FTag: g.String(),
+			OverBose: g.OverBose,
+			FTag:     g.String(),
 			AckSender: func(seq, ack, receiveWinSize uint16) (err error) {
 				m := &v1.Message{}
 				m.ACK(seq, ack, receiveWinSize)
