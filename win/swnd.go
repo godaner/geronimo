@@ -51,7 +51,8 @@ const (
 	min_rto    = time.Duration(1) * time.Nanosecond
 	max_rto    = time.Duration(500) * time.Millisecond
 	def_rto    = time.Duration(100) * time.Millisecond
-	ob_max_rto = time.Duration(1) * time.Millisecond
+	ob_min_rto = time.Duration(1) * time.Nanosecond
+	ob_max_rto = time.Duration(10) * time.Millisecond
 	ob_def_rto = time.Duration(1) * time.Millisecond
 )
 const (
@@ -89,8 +90,8 @@ func init() {
 	if max_rto <= min_rto {
 		panic("max_rto <= min_rto")
 	}
-	if ob_max_rto <= min_rto {
-		panic("ob_max_rto <= min_rto")
+	if ob_max_rto <= ob_min_rto {
+		panic("ob_max_rto <= ob_min_rto")
 	}
 }
 
@@ -240,7 +241,6 @@ func (s *SWND) init() {
 		}
 		s.logger = gologging.GetLogger(s.String())
 		s.ssthresh = defSsthresh
-		s.swnd = s.cwnd
 		s.tSeq = minSeqN
 		s.hSeq = s.tSeq
 		s.appBuffer = &bq{Size: appBufferSize}
@@ -262,6 +262,7 @@ func (s *SWND) init() {
 			s.rwnd = defRecWinSize
 			s.cwnd = defCongWinSize
 		}
+		s.swnd = s.cwnd
 		s.loopFlush()
 	})
 }
@@ -303,7 +304,7 @@ func (s *SWND) readMSS() (seg *segment) {
 	if len(bs) <= 0 {
 		return nil
 	}
-	return newSSegment(s.logger, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
+	return newSSegment(s.logger, s.OverBose, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
 }
 
 // readAny
@@ -318,7 +319,7 @@ func (s *SWND) readAny() (seg *segment) {
 	if len(bs) <= 0 {
 		return nil
 	}
-	return newSSegment(s.logger, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
+	return newSSegment(s.logger, s.OverBose, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
 }
 
 // send
@@ -395,8 +396,8 @@ func (s *SWND) comRTO(rttm float64) {
 	s.rto = s.rtts + 4*s.rttd
 	switch s.OverBose {
 	case true:
-		if s.rto < min_rto {
-			s.rto = min_rto
+		if s.rto < ob_min_rto {
+			s.rto = ob_min_rto
 		}
 		if s.rto > ob_max_rto {
 			s.rto = ob_max_rto
