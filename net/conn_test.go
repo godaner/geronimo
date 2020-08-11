@@ -1,8 +1,9 @@
-package v2
+package net
 
 import (
 	"crypto/md5"
 	"fmt"
+	gologging "github.com/godaner/geronimo/logger/go-logging"
 	"io"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 )
 
 func TestDial(t *testing.T) {
+	gologging.SetLogger("TestDial")
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
 
@@ -24,7 +26,7 @@ func TestDial(t *testing.T) {
 	//go func() {
 	//	s()
 	//}()
-	//time.Sleep(1000000 * time.Hour)
+	time.Sleep(1000000 * time.Hour)
 }
 func r() {
 	l, err := Listen(&GAddr{
@@ -78,14 +80,14 @@ func s() {
 		panic(err)
 	}
 	fmt.Println("Dial", conn.Status() == StatusEstablished)
-	info, err := os.Stat("./src1")
+	info, err := os.Stat("./src2")
 	if err != nil {
 		panic(err)
 	}
 	size := info.Size()
 	fmt.Println(size)
 
-	file, err := os.Open("./src1")
+	file, err := os.Open("./src2")
 
 	if err != nil {
 		panic(err)
@@ -127,6 +129,8 @@ func md5S(bs []byte) (s string) {
 	return md5str2
 }
 func TestGConn_Read(t *testing.T) {
+
+	gologging.SetLogger("TestGConn_Read")
 	go http.ListenAndServe(":8888", nil)
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
@@ -154,34 +158,39 @@ func TestGConn_Read(t *testing.T) {
 		i := uint64(0)
 		for {
 			bs := make([]byte, len(s), len(s))
-			n, err := io.ReadFull(c2, bs)
-			fmt.Println(i, n, err, string(bs))
+			io.ReadFull(c2, bs)
+			//n, err := io.ReadFull(c2, bs)
+			//fmt.Println(i, n,len(bs), err, string(bs))
 			ssmd5 := md5S(bs)
 			if ssmd5 != smd5 {
+				//time.Sleep(1*time.Second)
 				panic("not right md5")
 			}
 			i++
 		}
 	}()
 	time.Sleep(500 * time.Millisecond)
-	c1, err := Dial(&GAddr{
+	for i:=0;i<2;i++{
+		c1, err := Dial(&GAddr{
 
-		IP:   "192.168.6.6",
-		Port: 2222,
-	})
-	if err != nil {
-		panic(err)
-	}
-	go func() {
-		for {
-			c1.Write(s)
+			IP:   "192.168.6.6",
+			Port: 2222,
+		})
+		if err != nil {
+			panic(err)
 		}
-	}()
+		go func() {
+			for {
+				c1.Write(s)
+			}
+		}()
+	}
 
 	time.Sleep(1000 * time.Second)
 }
 func TestGConn_Close(t *testing.T) {
 
+	gologging.SetLogger("TestGConn_Close")
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
 	s := []byte{}
@@ -241,8 +250,8 @@ func TestGConn_Close(t *testing.T) {
 }
 
 func TestGConn_Close2(t *testing.T) {
+	gologging.SetLogger("TestGConn_Close2")
 	go func() {
-		time.Sleep(2 * time.Second)
 		l, err := Listen(&GAddr{
 			IP:   "192.168.6.6",
 			Port: 3333,
@@ -257,12 +266,15 @@ func TestGConn_Close2(t *testing.T) {
 		fmt.Println(c2)
 		bs:=make([]byte,15,15)
 		n,err:=c2.Read(bs)
-		fmt.Println(n,err,bs)
+		fmt.Println(n,err,string(bs))
 	}()
 	c1, err := Dial(&GAddr{
 		IP:   "192.168.6.6",
 		Port: 3333,
 	})
+	if err!=nil{
+		panic(err)
+	}
 	fmt.Println("w dial",c1,err)
 	n,err:=c1.Write([]byte("ccccccccccccccc"))
 	fmt.Println("w n",n)
@@ -275,6 +287,7 @@ func TestGConn_Close2(t *testing.T) {
 	time.Sleep(1000*time.Second)
 }
 func TestGListener_Accept(t *testing.T) {
+	gologging.SetLogger("TestGListener_Accept")
 	s1:="s1"
 	s2:="s2"
 	go func() {
@@ -332,6 +345,7 @@ func TestGListener_Accept(t *testing.T) {
 }
 
 func TestGListener_Close(t *testing.T) {
+	gologging.SetLogger("TestGListener_Close")
 	hello1:="hello1"
 	hello2:="hello2"
 	// listen
