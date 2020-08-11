@@ -51,7 +51,7 @@ const (
 	min_rto    = time.Duration(1) * time.Nanosecond
 	max_rto    = time.Duration(500) * time.Millisecond
 	def_rto    = time.Duration(100) * time.Millisecond
-	ob_max_rto = time.Duration(50) * time.Millisecond
+	ob_max_rto = time.Duration(20) * time.Millisecond
 	ob_def_rto = time.Duration(5) * time.Millisecond
 )
 const (
