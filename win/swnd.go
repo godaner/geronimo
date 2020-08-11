@@ -31,8 +31,8 @@ const (
 const (
 	defCongWinSize   = 1
 	defRecWinSize    = 32
-	obDefCongWinSize = 32
-	obDefRecWinSize  = 128
+	obDefCongWinSize = 64
+	obDefRecWinSize  = 256
 )
 
 const (
@@ -205,6 +205,9 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		case true:
 		case false:
 			s.ssthresh = s.cwnd / 2
+			if s.ssthresh <= 0 {
+				s.ssthresh = 1
+			}
 			s.cwnd = s.ssthresh
 			s.comSendWinSize()
 		}
@@ -218,6 +221,9 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 			}
 		case false:
 			s.ssthresh = s.cwnd / 2
+			if s.ssthresh <= 0 {
+				s.ssthresh = 1
+			}
 			s.cwnd = 1
 		}
 		s.comSendWinSize()
