@@ -220,7 +220,7 @@ func (s *segment) resend() (err error) {
 
 // incRTO
 func (s *segment) incRTO() {
-	s.rto = time.Duration(2 * float64(s.rto))
+	s.rto = 2 * s.rto
 	if s.rto < min_rto {
 		s.rto = min_rto
 	}

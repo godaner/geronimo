@@ -14,22 +14,28 @@ const (
 	msgQSize = 100
 )
 
-func Listen(addr *GAddr) (l net.Listener, err error) {
+func Listen(addr *GAddr, options ...Option) (l net.Listener, err error) {
+	opts := &Options{}
+	for _, o := range options {
+		o(opts)
+	}
 	c, err := net.ListenUDP("udp", addr.toUDPAddr())
 	if err != nil {
 		panic(err)
 		return nil, err
 	}
 	return &GListener{
-		laddr: addr,
-		c:     c,
+		OverBose: opts.OverBose,
+		laddr:    addr,
+		c:        c,
 	}, nil
 }
 
 type GListener struct {
-	rmConnLock sync.RWMutex
-	closeLock  sync.RWMutex
 	sync.Once
+	rmConnLock   sync.RWMutex
+	closeLock    sync.RWMutex
+	OverBose     bool
 	laddr        *GAddr
 	c            *net.UDPConn
 	gcs          *sync.Map //map[string]*GConn
@@ -73,12 +79,13 @@ func (g *GListener) init() {
 					if gc == nil {
 						// first connect
 						gc = &GConn{
-							UDPConn: g.c,
-							raddr:   fromUDPAddr(rAddr),
-							laddr:   fromUDPAddr(g.c.LocalAddr().(*net.UDPAddr)),
-							s:       StatusListen,
-							f:       FListen,
-							lis:     g,
+							UDPConn:  g.c,
+							OverBose: g.OverBose,
+							raddr:    fromUDPAddr(rAddr),
+							laddr:    fromUDPAddr(g.c.LocalAddr().(*net.UDPAddr)),
+							s:        StatusListen,
+							f:        FListen,
+							lis:      g,
 						}
 						g.gcs.Store(rAddr.String(), gc)
 						msg := make(chan *v1.Message, msgQSize)

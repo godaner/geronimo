@@ -113,14 +113,20 @@ func GetLogger(tag string) logger.Logger {
 	var format = logging.MustStringFormatter(
 		"%{color}%{time:2006-01-02 15:04:05.000} " + module + tag + " > %{level:.4s} %{color:reset} %{message}",
 	)
+	bs := make([]logging.Backend, 0)
 	// std
 	stdLog := logging.NewLogBackend(os.Stdout, "", 0)
 	stdLogF := logging.NewBackendFormatter(stdLog, format)
-	// file
-	fileLog := logging.NewLogBackend(NewLogWrite(logPath+"/"+module, module), "", 0)
-	fileLogF := logging.NewBackendFormatter(fileLog, format)
+	bs = append(bs, stdLogF)
+	if logPath != "" {
+		// file
+		fileLog := logging.NewLogBackend(NewLogWrite(logPath+"/"+module, module), "", 0)
+		fileLogF := logging.NewBackendFormatter(fileLog, format)
+		bs = append(bs, fileLogF)
+	}
+
 	// set lev
-	le := logging.MultiLogger(stdLogF, fileLogF)
+	le := logging.MultiLogger(bs...)
 	le.SetLevel(logging.Level(*level), "")
 	logger.SetBackend(le)
 	return &Logger{logger: logger}
@@ -132,7 +138,7 @@ func getEnvLogPath() string {
 	if lp != "" {
 		return lp
 	}
-	return logger.DefLogPath
+	return ""
 }
 
 // getEnvLev

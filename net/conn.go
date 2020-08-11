@@ -56,6 +56,7 @@ func (s Status) String() string {
 
 type GConn struct {
 	*net.UDPConn
+	OverBose                                                        bool
 	initOnce, initSendWinOnce, initRecvWinOnce, initLoopReadUDPOnce sync.Once
 	f                                                               uint8
 	s                                                               Status
@@ -210,7 +211,8 @@ func (g *GConn) initRecvWin() {
 func (g *GConn) initSendWin() {
 	g.initSendWinOnce.Do(func() {
 		g.sendWin = &win.SWND{
-			FTag: g.String(),
+			OverBose: g.OverBose,
+			FTag:     g.String(),
 			SegmentSender: func(seq uint16, bs []byte) (err error) {
 				// send udp
 				m := &v1.Message{}
