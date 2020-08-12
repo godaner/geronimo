@@ -9,7 +9,7 @@ import (
 
 const (
 	quickResendIfAckGEN = 3
-	maxResendC          = 15
+	maxResendC          = 10
 )
 
 var (
