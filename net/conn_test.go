@@ -397,3 +397,28 @@ func TestGListener_Close(t *testing.T) {
 	}()
 	time.Sleep(1000 * time.Second)
 }
+func TestGConn_LocalAddr(t *testing.T) {
+	gologging.SetLogger("TestGConn_LocalAddr")
+	// listen
+	go func() {
+		l, err := Listen(&GAddr{
+			IP:   "192.168.6.6",
+			Port: 3333,
+		})
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(l)
+		l.Accept()
+
+	}()
+	go func() {
+		time.Sleep(1*time.Second)
+		c2, err := Dial(&GAddr{
+			IP:   "192.168.6.6",
+			Port: 3333,
+		})
+		fmt.Println(c2, err)
+	}()
+	time.Sleep(1000 * time.Second)
+}

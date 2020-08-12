@@ -490,12 +490,16 @@ func (s *SWND) waitLastAck() {
 
 	}
 }
-
+// loopPrint
 func (s *SWND) loopPrint() {
 	go func() {
 		for;;{
-			s.logger.Info("SWND : loop print , appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", recv win size is", s.rwnd, ", cong win size is", s.cwnd, ", rto is", int64(s.rto))
-			<-time.After(5*time.Second)
+			select {
+			case <-s.closeSignal:
+				return
+			case <-time.After(5 * time.Second):
+				s.logger.Info("SWND : loop print , appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", recv win size is", s.rwnd, ", cong win size is", s.cwnd, ", rto is", int64(s.rto))
+			}
 		}
 	}()
 }

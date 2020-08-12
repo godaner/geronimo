@@ -6,7 +6,8 @@ import (
 	"github.com/godaner/geronimo/logger"
 	gologging "github.com/godaner/geronimo/logger/go-logging"
 	"github.com/godaner/geronimo/rule"
-	v1 "github.com/godaner/geronimo/rule/v1"
+	msg "github.com/godaner/geronimo/rule"
+	msgn "github.com/godaner/geronimo/rule/new"
 	"github.com/godaner/geronimo/win"
 	"github.com/looplab/fsm"
 	"math/rand"
@@ -18,6 +19,10 @@ import (
 
 const (
 	udpmss = 1472
+)
+const (
+	keepalive   = time.Duration(30) * time.Second
+	keepaliveTo = 4 * keepalive
 )
 const (
 	syn1ResendTime  = time.Duration(500) * time.Millisecond
@@ -63,21 +68,22 @@ var (
 
 type GConn struct {
 	*net.UDPConn
-	OverBose                                                        bool
-	initOnce, initSendWinOnce, initRecvWinOnce, initLoopReadUDPOnce sync.Once
-	f                                                               uint8
-	recvWin                                                         *win.RWND
-	sendWin                                                         *win.SWND
-	raddr                                                           *GAddr
-	laddr                                                           *GAddr
-	lis                                                             *GListener
-	synSeqX, synSeqY, finSeqU, finSeqV                              uint16
-	syn1Finish, fin1Finish                                          chan bool
-	syn1ResendCount, fin1ResendCount                                uint8
-	rdl, wdl                                                        time.Time
-	mhs                                                             map[uint16]messageHandler
-	logger                                                          logger.Logger
-	fsm                                                             *fsm.FSM
+	OverBose                                                                       bool
+	initOnce, keepaliveOnce, initSendWinOnce, initRecvWinOnce, initLoopReadUDPOnce sync.Once
+	f                                                                              uint8
+	recvWin                                                                        *win.RWND
+	sendWin                                                                        *win.SWND
+	raddr                                                                          *GAddr
+	laddr                                                                          *GAddr
+	lis                                                                            *GListener
+	synSeqX, synSeqY, finSeqU, finSeqV                                             uint16
+	syn1Finish, fin1Finish                                                         chan struct{}
+	syn1ResendCount, fin1ResendCount                                               uint8
+	rdl, wdl                                                                       time.Time
+	keepaliveC                                                                     chan struct{}
+	mhs                                                                            map[uint16]messageHandler
+	logger                                                                         logger.Logger
+	fsm                                                                            *fsm.FSM
 }
 
 func (g *GConn) String() string {
@@ -143,8 +149,9 @@ func (g *GConn) Status() (s string) {
 func (g *GConn) init() {
 	g.initOnce.Do(func() {
 		g.logger = gologging.GetLogger(g.String())
-		g.syn1Finish = make(chan bool)
-		g.fin1Finish = make(chan bool)
+		g.syn1Finish = make(chan struct{})
+		g.fin1Finish = make(chan struct{})
+		g.keepaliveC = make(chan struct{})
 		// init message handlers
 		g.mhs = map[uint16]messageHandler{
 			// syn
@@ -157,17 +164,19 @@ func (g *GConn) init() {
 			rule.FlagPAYLOAD: g.payloadMessageHandler,
 			// ack
 			rule.FlagACK: g.ackMessageHandler,
+			// keepalive
+			rule.FlagKeepAlive: g.keepaliveMessageHandler,
 		}
 		// fsm
 		g.fsm = fsm.NewFSM(
 			StatusInit,
 			fsm.Events{
 				{Name: EventCliDial, Src: []string{StatusInit}, Dst: StatusSynSent},
-				{Name: EventSerRecvSyn1, Src: []string{StatusInit}, Dst: StatusSerEstablished},
+				{Name: EventSerRecvSyn1, Src: []string{StatusInit, StatusSerEstablished}, Dst: StatusSerEstablished},
 				{Name: EventCliRecvSyn2, Src: []string{StatusSynSent}, Dst: StatusCliEstablished},
 				{Name: EventCliNotRecvSyn2Err, Src: []string{StatusSynSent}, Dst: StatusClosed},
 				{Name: EventClose, Src: []string{StatusSerEstablished, StatusCliEstablished}, Dst: StatusFinWait1},
-				{Name: EventRecvFin1, Src: []string{StatusSerEstablished, StatusCliEstablished}, Dst: StatusClosed},
+				{Name: EventRecvFin1, Src: []string{StatusSerEstablished, StatusCliEstablished, StatusClosed}, Dst: StatusClosed},
 				{Name: EventRecvFin2, Src: []string{StatusFinWait1}, Dst: StatusClosed},
 				{Name: EventNotRecvFin2Err, Src: []string{StatusFinWait1}, Dst: StatusClosed},
 				{Name: EventForceClose, Src: []string{StatusSerEstablished, StatusCliEstablished}, Dst: StatusClosed},
@@ -185,7 +194,7 @@ func (g *GConn) init() {
 					//block chan struct{},
 					err = func() (err error) {
 						// sync req
-						m1 := &v1.Message{}
+						m1 := msgn.NewMessage()
 						if g.synSeqX == 0 {
 							//g.synSeqX = uint32(rand.Int31n(2<<16 - 2))
 							g.synSeqX = g.random()
@@ -219,23 +228,27 @@ func (g *GConn) init() {
 
 				},
 				StatusSerEstablished: func(event *fsm.Event) {
-					m := event.Args[0].(*v1.Message)
+					m := event.Args[0].(msg.Message)
 					g.synSeqX = m.SeqN()
 					if g.synSeqY == 0 {
 						g.synSeqY = g.random()
 					}
 					g.initWin()
-					m1 := &v1.Message{}
+					m1 := msgn.NewMessage()
 					m1.SYN2(g.synSeqY, g.synSeqX+1)
 					err := g.sendMessage(m1)
 					if err != nil {
 						g.logger.Error("GConn#syn1MessageHandler : sendMessage1 err", err)
 					}
+					// keepalive
+					g.keepalive()
 					g.lis.acceptResult <- &acceptRes{c: g, err: nil}
 				},
 				StatusCliEstablished: func(event *fsm.Event) {
+					// init window
 					g.initWin()
-					// todo keepalive
+					// keepalive
+					g.keepalive()
 				},
 				StatusClosed: func(event *fsm.Event) {
 					// recv syn2 err , maybe wait for syn2 timeout, etc.
@@ -244,8 +257,8 @@ func (g *GConn) init() {
 						return
 					}
 					// recv fin1 , then close the conn
-					if event.Event == EventRecvFin1 && (event.Src == StatusCliEstablished || event.Src == StatusSerEstablished) {
-						m := event.Args[0].(*v1.Message)
+					if event.Event == EventRecvFin1 && (event.Src == StatusCliEstablished || event.Src == StatusSerEstablished || event.Src == StatusClosed) {
+						m := event.Args[0].(msg.Message)
 						g.logger.Notice("GConn#fin1MessageHandler : recv FIN1 start")
 						g.finSeqU = m.SeqN()
 						if g.finSeqV == 0 {
@@ -258,11 +271,8 @@ func (g *GConn) init() {
 						if err != nil {
 							g.logger.Error("GConn#fin1MessageHandler : sendMessage1 err", err)
 						}
-						// wait 2msl??
-						go func() {
-							<-time.After(2 * msl)
-							g.closeUDPConn()
-						}()
+						// wait 2msl , maybe recv fin1 again
+						g.wait2msl()
 						return
 					}
 					// recv fin2 success
@@ -294,7 +304,7 @@ func (g *GConn) init() {
 					}()
 					err = func() (err error) {
 						g.closeSendWin()
-						m := &v1.Message{}
+						m := msgn.NewMessage()
 						if g.finSeqU == 0 {
 							g.finSeqU = g.random()
 						}
@@ -348,7 +358,7 @@ func (g *GConn) loopReadUDP() {
 							}
 							return
 						}
-						m := &v1.Message{}
+						m := msgn.NewMessage()
 						m.UnMarshall(bs[:n])
 						err = g.handleMessage(m)
 						if err != nil {
@@ -379,7 +389,7 @@ func (g *GConn) initRecvWin() {
 			OverBose: g.OverBose,
 			FTag:     g.String(),
 			AckSender: func(seq, ack, receiveWinSize uint16) (err error) {
-				m := &v1.Message{}
+				m := msgn.NewMessage()
 				m.ACK(seq, ack, receiveWinSize)
 				return g.sendMessage(m)
 			},
@@ -395,7 +405,7 @@ func (g *GConn) initSendWin() {
 			FTag:     g.String(),
 			SegmentSender: func(seq uint16, bs []byte) (err error) {
 				// send udp
-				m := &v1.Message{}
+				m := msgn.NewMessage()
 				m.PAYLOAD(seq, bs)
 				return g.sendMessage(m)
 			},
@@ -404,7 +414,7 @@ func (g *GConn) initSendWin() {
 }
 
 // handleMessage
-func (g *GConn) handleMessage(m *v1.Message) (err error) {
+func (g *GConn) handleMessage(m msg.Message) (err error) {
 	g.init()
 	mh, ok := g.mhs[m.Flag()]
 	if ok && mh != nil {
@@ -415,7 +425,7 @@ func (g *GConn) handleMessage(m *v1.Message) (err error) {
 }
 
 // sendMessage
-func (g *GConn) sendMessage(m *v1.Message) (err error) {
+func (g *GConn) sendMessage(m msg.Message) (err error) {
 	b := m.Marshall()
 	if g.f == FDial {
 		g.logger.Debug("GConn : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String(), ", flag is", m.Flag())
@@ -527,4 +537,53 @@ func (g *GConn) close() (err error) {
 		return err
 	}
 	return nil
+}
+
+// keepalive
+func (g *GConn) keepalive() {
+	g.keepaliveOnce.Do(func() {
+		// send keepalive
+		go func() {
+			for {
+				select {
+				case <-time.After(keepalive):
+					m := msgn.NewMessage()
+					m.KeepAlive()
+					err := g.sendMessage(m)
+					if err != nil {
+						g.logger.Error("GConn#keepalive : send keepalive err", err)
+						g.Close()
+						return
+					}
+				}
+			}
+		}()
+
+		// recv keepalive
+		go func() {
+			keepaliveTimer := time.NewTimer(keepaliveTo)
+			for {
+				select {
+				case <-keepaliveTimer.C:
+					keepaliveTimer.Stop()
+					g.logger.Error("GConn#keepalive : keepalive timeout")
+					g.Close()
+					return
+				case <-g.keepaliveC:
+					keepaliveTimer.Reset(keepaliveTo)
+					continue
+				}
+			}
+		}()
+	})
+
+}
+
+// wait2msl
+func (g *GConn) wait2msl() {
+	// wait 2msl??
+	go func() {
+		<-time.After(2 * msl)
+		g.closeUDPConn()
+	}()
 }

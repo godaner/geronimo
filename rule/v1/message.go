@@ -61,7 +61,6 @@ type Message struct {
 	Attr     []Attr
 	AttrMaps map[byte][]byte
 }
-
 func (m *Message) SeqN() uint16 {
 	return m.Header.SeqN()
 }
@@ -187,10 +186,6 @@ func (m *Message) SYN2(seqN, ackN uint16) {
 	m.newMessage(rule.FlagSYN2, seqN, ackN, 0)
 }
 
-func (m *Message) SYN3(seqN, ackN uint16) {
-	m.newMessage(rule.FlagSYN3, seqN, ackN, 0)
-}
-
 func (m *Message) FIN1(seqN uint16) {
 	m.newMessage(rule.FlagFIN1, seqN, 0, 0)
 }
@@ -199,13 +194,6 @@ func (m *Message) FIN2(seqN, ackN uint16) {
 	m.newMessage(rule.FlagFIN2, seqN, ackN, 0)
 }
 
-func (m *Message) FIN3(seqN, ackN uint16) {
-	m.newMessage(rule.FlagFIN3, seqN, ackN, 0)
-}
-
-func (m *Message) FIN4(seqN, ackN uint16) {
-	m.newMessage(rule.FlagFIN4, seqN, ackN, 0)
-}
 func (m *Message) ACK(seqN, ackN, winSize uint16) {
 	m.newMessage(rule.FlagACK, seqN, ackN, winSize)
 }
@@ -218,6 +206,10 @@ func (m *Message) PAYLOAD(seqN uint16, payload []byte) {
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))
 }
+func (m *Message) KeepAlive() {
+	m.newMessage(rule.FlagKeepAlive, 0, 0, 0)
+}
+
 func (m *Message) newMessage(flag, seqN, ackN uint16, winSize uint16) {
 	m.Header = Header{
 		HFlag:    flag,

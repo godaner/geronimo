@@ -7,15 +7,13 @@ type Message interface {
 	AttributeByType(byte) []byte
 
 	// op
-	SYN1(seqN uint32)
-	SYN2(seqN, ackN uint32)
-	SYN3(seqN, ackN uint32)
-	FIN1(seqN uint32)
-	FIN2(seqN, ackN uint32)
-	FIN3(seqN, ackN uint32)
-	FIN4(seqN, ackN uint32)
-	ACK(ackN uint32, winSize uint16)
-	PAYLOAD(seqN uint32, payload []byte)
+	SYN1(seqN uint16)
+	SYN2(seqN, ackN uint16)
+	FIN1(seqN uint16)
+	FIN2(seqN, ackN uint16)
+	ACK(seqN, ackN, winSize uint16)
+	PAYLOAD(seqN uint16, payload []byte)
+	KeepAlive()
 
 	// from head
 	SeqN() uint16

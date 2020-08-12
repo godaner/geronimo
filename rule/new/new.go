@@ -6,10 +6,14 @@ import (
 )
 
 // NewMessage
-func NewMessage(opts ...Option) (m rule.Message) {
+func NewMessage() (m rule.Message) {
+	return &v1.Message{}
+}
+
+// SetOptions
+func SetOptions(opts ...Option) {
 	options := Options{}
 	for _, o := range opts {
 		o(&options)
 	}
-	return &v1.Message{}
 }

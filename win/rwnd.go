@@ -195,13 +195,16 @@ func (r *RWND) Close() (err error) {
 	}
 	return nil
 }
-
+// loopPrint
 func (r *RWND) loopPrint() {
-
 	go func() {
-		for;;{
-			r.logger.Info("RWND : loop print , appBuffer len is", r.appBuffer.Len(), ", recvd len is", len(r.recved),  ", recv win size is", r.rwnd)
-			<-time.After(5*time.Second)
+		for {
+			select {
+			case <-r.closeSignal:
+				return
+			case <-time.After(5 * time.Second):
+				r.logger.Info("RWND : loop print , appBuffer len is", r.appBuffer.Len(), ", recvd len is", len(r.recved), ", recv win size is", r.rwnd)
+			}
 		}
 	}()
 }

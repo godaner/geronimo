@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/godaner/geronimo/logger"
 	gologging "github.com/godaner/geronimo/logger/go-logging"
+	"github.com/godaner/geronimo/rule"
 	v1 "github.com/godaner/geronimo/rule/v1"
 	"net"
 	"sync"
@@ -76,7 +77,7 @@ func (g *GListener) init() {
 					m1.UnMarshall(bs[:n])
 					gcI, _ := g.gcs.Load(rAddr.String())
 					gc, _ := gcI.(*GConn)
-					if gc == nil {
+					if gc == nil && m1.Flag()&rule.FlagSYN1 == rule.FlagSYN1 {
 						// first connect
 						gc = &GConn{
 							UDPConn:  g.c,
