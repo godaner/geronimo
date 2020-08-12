@@ -66,19 +66,18 @@ type GConn struct {
 	OverBose                                                        bool
 	initOnce, initSendWinOnce, initRecvWinOnce, initLoopReadUDPOnce sync.Once
 	f                                                               uint8
-	//s                                                               Status
-	recvWin                                        *win.RWND
-	sendWin                                        *win.SWND
-	raddr                                          *GAddr
-	laddr                                          *GAddr
-	lis                                            *GListener
-	synSeqX, synSeqY, finSeqU, finSeqV, finSeqW    uint16
-	syn1Finish, syn2Finish, fin1Finish, fin3Finish chan bool
-	syn1ResendCount, fin1ResendCount               uint8
-	rdl, wdl                                       time.Time
-	mhs                                            map[uint16]messageHandler
-	logger                                         logger.Logger
-	fsm                                            *fsm.FSM
+	recvWin                                                         *win.RWND
+	sendWin                                                         *win.SWND
+	raddr                                                           *GAddr
+	laddr                                                           *GAddr
+	lis                                                             *GListener
+	synSeqX, synSeqY, finSeqU, finSeqV                              uint16
+	syn1Finish, fin1Finish                                          chan bool
+	syn1ResendCount, fin1ResendCount                                uint8
+	rdl, wdl                                                        time.Time
+	mhs                                                             map[uint16]messageHandler
+	logger                                                          logger.Logger
+	fsm                                                             *fsm.FSM
 }
 
 func (g *GConn) String() string {
@@ -90,9 +89,6 @@ func (g *GConn) Read(b []byte) (n int, err error) {
 
 	if g.Status() != StatusCliEstablished && g.Status() != StatusSerEstablished {
 		return 0, ErrNotEstablished
-	}
-	if g.recvWin == nil {
-		g.logger.Error("nil recv")
 	}
 	return g.recvWin.Read(b, g.rdl)
 }
@@ -148,9 +144,7 @@ func (g *GConn) init() {
 	g.initOnce.Do(func() {
 		g.logger = gologging.GetLogger(g.String())
 		g.syn1Finish = make(chan bool)
-		g.syn2Finish = make(chan bool)
 		g.fin1Finish = make(chan bool)
-		g.fin3Finish = make(chan bool)
 		// init message handlers
 		g.mhs = map[uint16]messageHandler{
 			// syn
