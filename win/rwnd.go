@@ -7,6 +7,7 @@ import (
 	gologging "github.com/godaner/geronimo/logger/go-logging"
 	"io"
 	"sync"
+	"time"
 )
 
 // The Receive-Window is as follow :
@@ -107,6 +108,7 @@ func (r *RWND) init() {
 		case false:
 			r.rwnd = defRecWinSize
 		}
+		r.loopPrint()
 	})
 }
 
@@ -191,4 +193,14 @@ func (r *RWND) Close() (err error) {
 		close(r.closeSignal)
 	}
 	return nil
+}
+
+func (r *RWND) loopPrint() {
+
+	go func() {
+		for;;{
+			r.logger.Info("RWND : loop print , appBuffer len is", r.appBuffer.Len(), ", recvd len is", len(r.recved),  ", recv win size is", r.rwnd)
+			<-time.After(5*time.Second)
+		}
+	}()
 }

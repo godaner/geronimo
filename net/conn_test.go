@@ -186,7 +186,7 @@ func TestGConn_Read(t *testing.T) {
 		}()
 	}
 
-	time.Sleep(1000 * time.Second)
+	time.Sleep(1000 * time.Hour)
 }
 func TestGConn_Close(t *testing.T) {
 

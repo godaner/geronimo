@@ -57,8 +57,7 @@ const (
 )
 const (
 	closeTimeout               = time.Duration(5) * time.Second
-	clearReadySendInterval     = time.Duration(100) * time.Millisecond
-	clearReadySendLongInterval = time.Duration(1) * time.Minute // ms
+	clearReadySendInterval     = time.Duration(10) * time.Millisecond
 	// flush
 	closeCheckFlushInterval = closeCheckFlushTO / closeCheckFlushNum
 	closeCheckFlushNum      = appBufferMSS * 2 // should ge bq size
@@ -270,6 +269,7 @@ func (s *SWND) init() {
 		}
 		s.swnd = s.cwnd
 		s.loopFlush()
+		s.loopPrint()
 	})
 }
 func (s *SWND) trimAckSeg() {
@@ -303,7 +303,7 @@ func (s *SWND) readMSS() (seg *segment) {
 		s.flushTimer.Reset(clearReadySendInterval) // flush after n ms
 		return nil
 	}
-	s.flushTimer.Reset(clearReadySendLongInterval) // no flush
+	s.flushTimer.Stop() // no flush
 	bs := make([]byte, mss, mss)
 	n := s.appBuffer.BlockPop(bs) // todo ?? blockpop ??
 	bs = bs[:n]
@@ -482,4 +482,13 @@ func (s *SWND) waitLastAck() {
 		}
 
 	}
+}
+
+func (s *SWND) loopPrint() {
+	go func() {
+		for;;{
+			s.logger.Info("SWND : loop print , appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", recv win size is", s.rwnd, ", cong win size is", s.cwnd, ", rto is", int64(s.rto))
+			<-time.After(5*time.Second)
+		}
+	}()
 }
