@@ -47,7 +47,7 @@ type RWND struct {
 }
 
 // Read
-func (r *RWND) Read(bs []byte) (n int, err error) {
+func (r *RWND) Read(bs []byte, rdl time.Time) (n int, err error) {
 	r.init()
 	r.readLock.Lock()
 	defer r.readLock.Unlock()
@@ -55,15 +55,22 @@ func (r *RWND) Read(bs []byte) (n int, err error) {
 	case <-r.closeSignal:
 		return 0, io.EOF
 	default:
-
 	}
 	if len(bs) <= 0 {
 		return 0, nil
 	}
+	to := make(<-chan time.Time)
+	if !rdl.IsZero() {
+		to = time.After(time.Now().Sub(rdl))
+	}
 	var nn uint32
-	nn, err = r.appBuffer.BlockPopWithStop(bs, r.closeSignal)
+	nn, err = r.appBuffer.BlockPopWithSignal(bs, r.closeSignal, to)
 	if err != nil {
-		return 0, io.EOF
+		r.logger.Error("RWND : read data from appBuffer err , err is", err)
+		if err.Error() == ErrStoped.Error() {
+			return 0, io.EOF
+		}
+		return 0, err
 	}
 	return int(nn), nil
 }
@@ -133,18 +140,12 @@ func (r *RWND) recved2AppBuffer() (breakk bool) {
 	if seg == nil {
 		return true
 	}
-	//rr := make(chan struct{})
-	//go func() { // test
-	//	select {
-	//	case <-rr:
-	//		return
-	//	case <-time.After(time.Duration(10) * time.Second):
-	//		panic("recved2AppBuffer push timeout , tag is : " + r.FTag + " , appBuffer len is : " + fmt.Sprint(r.appBuffer.Len()))
-	//	}
-	//}()
 	// put segment data to application buffer
-	r.appBuffer.BlockPush(nil, seg.bs...)
-	//close(rr)
+	err := r.appBuffer.BlockPushWithSignal(nil, make(<-chan time.Time), seg.bs...)
+	if err != nil {
+		r.logger.Critical("RWND : recved to appBuffer timeout")
+		return false
+	}
 	// delete segment
 	delete(r.recved, r.tailSeq)
 	seg = nil

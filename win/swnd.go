@@ -117,7 +117,7 @@ type SWND struct {
 }
 
 // Write
-func (s *SWND) Write(bs []byte) (err error) {
+func (s *SWND) Write(bs []byte, wdl time.Time) (err error) {
 	s.init()
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()
@@ -128,8 +128,11 @@ func (s *SWND) Write(bs []byte) (err error) {
 	default:
 	}
 	s.logger.Info("SWND : write appBuffer , len is", len(bs), ", appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd)
-
-	s.appBuffer.BlockPush(func() {
+	to := make(<-chan time.Time)
+	if !wdl.IsZero() {
+		to = time.After(time.Now().Sub(wdl))
+	}
+	err = s.appBuffer.BlockPushWithSignal(func() {
 		s.Lock()
 		defer s.Unlock()
 		err = s.send(s.readMSS)
@@ -137,7 +140,11 @@ func (s *SWND) Write(bs []byte) (err error) {
 			s.logger.Error("SWND : push event call send err , err is", err)
 			return
 		}
-	}, bs...)
+	}, to, bs...)
+	if err != nil {
+		s.logger.Error("SWND : push data to appBuffer err , err is", err)
+		return err
+	}
 	return nil
 }
 

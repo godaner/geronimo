@@ -8,6 +8,7 @@ import (
 	"github.com/godaner/geronimo/rule"
 	v1 "github.com/godaner/geronimo/rule/v1"
 	"github.com/godaner/geronimo/win"
+	//"github.com/looplab/fsm"
 	"math/rand"
 	"net"
 	"strconv"
@@ -68,8 +69,10 @@ type GConn struct {
 	synSeqX, synSeqY, finSeqU, finSeqV, finSeqW                     uint16
 	syn1Finish, syn2Finish, fin1Finish, fin3Finish                  chan bool
 	syn1ResendCount, fin1ResendCount                                uint8
+	rdl, wdl                                                        time.Time
 	mhs                                                             map[uint16]messageHandler
 	logger                                                          logger.Logger
+	//fsm                                                             *fsm.FSM
 }
 
 func (g *GConn) String() string {
@@ -78,7 +81,7 @@ func (g *GConn) String() string {
 
 func (g *GConn) Read(b []byte) (n int, err error) {
 	g.init()
-	return g.recvWin.Read(b)
+	return g.recvWin.Read(b,g.rdl)
 }
 
 func (g *GConn) Write(b []byte) (n int, err error) {
@@ -86,7 +89,7 @@ func (g *GConn) Write(b []byte) (n int, err error) {
 	if g.Status() == StatusClosed {
 		return 0, ErrConnClosed
 	}
-	return len(b), g.sendWin.Write(b)
+	return len(b), g.sendWin.Write(b,g.wdl)
 }
 
 func (g *GConn) Close() error {
@@ -106,17 +109,21 @@ func (g *GConn) RemoteAddr() net.Addr {
 
 func (g *GConn) SetDeadline(t time.Time) error {
 	g.init()
-	panic("implement me")
+	g.rdl = t
+	g.wdl = t
+	return nil
 }
 
 func (g *GConn) SetReadDeadline(t time.Time) error {
 	g.init()
-	panic("implement me")
+	g.rdl = t
+	return nil
 }
 
 func (g *GConn) SetWriteDeadline(t time.Time) error {
 	g.init()
-	panic("implement me")
+	g.wdl = t
+	return nil
 }
 
 func (g *GConn) Status() (s Status) {
@@ -144,6 +151,37 @@ func (g *GConn) init() {
 			// ack
 			rule.FlagACK: g.ackMessageHandler,
 		}
+		// fsm
+		//g.fsm = fsm.NewFSM(
+		//	string(endpoint.Status_Stoped),
+		//	fsm.Events{
+		//		{Name: string(endpoint.Event_Start), Src: []string{string(endpoint.Status_Stoped)}, Dst: string(endpoint.Status_Started)},
+		//		{Name: string(endpoint.Event_Stop), Src: []string{string(endpoint.Status_Started)}, Dst: string(endpoint.Status_Stoped)},
+		//		{Name: string(endpoint.Event_Destroy), Src: []string{string(endpoint.Status_Started), string(endpoint.Status_Stoped)}, Dst: string(endpoint.Status_Destroied)},
+		//	},
+		//	fsm.Callbacks{
+		//		string(endpoint.Event_Start): func(event *fsm.Event) {
+		//			jb, _ := json.Marshal(event)
+		//			log.Printf("Client#int : receive fsm start event , cliID is : %v , event is : %v !", p.cliID, string(jb))
+		//			p.stopSignal = make(chan bool)
+		//			p.forwardConnRID = sync.Map{}
+		//			go p.listenProxy()
+		//		},
+		//		string(endpoint.Event_Stop): func(event *fsm.Event) {
+		//			jb, _ := json.Marshal(event)
+		//			log.Printf("Client#int : receive fsm stop event , cliID is : %v , event is : %v !", p.cliID, string(jb))
+		//			close(p.stopSignal)
+		//		},
+		//		string(endpoint.Event_Destroy): func(event *fsm.Event) {
+		//			jb, _ := json.Marshal(event)
+		//			log.Printf("Client#int : receive fsm destroy event , cliID is : %v , event is : %v !", p.cliID, string(jb))
+		//			if event.Src != string(endpoint.Status_Stoped) { // maybe from started
+		//				close(p.stopSignal)
+		//			}
+		//			close(p.destroySignal)
+		//		},
+		//	},
+		//)
 
 	})
 }
