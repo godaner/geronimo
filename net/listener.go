@@ -83,7 +83,6 @@ func (g *GListener) init() {
 							OverBose: g.OverBose,
 							raddr:    fromUDPAddr(rAddr),
 							laddr:    fromUDPAddr(g.c.LocalAddr().(*net.UDPAddr)),
-							s:        StatusListen,
 							f:        FListen,
 							lis:      g,
 						}

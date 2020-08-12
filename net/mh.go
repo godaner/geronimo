@@ -10,19 +10,12 @@ type messageHandler func(m *v1.Message) (err error)
 // syn1MessageHandler
 func (g *GConn) syn1MessageHandler(m *v1.Message) (err error) {
 	g.logger.Notice("GConn#syn1MessageHandler : recv SYN1 start")
-	g.s = StatusEstablished
-	g.synSeqX = m.SeqN()
-	if g.synSeqY == 0 {
-		g.synSeqY = g.random()
-	}
-	g.initWin()
-	m1 := &v1.Message{}
-	m1.SYN2(g.synSeqY, g.synSeqX+1)
-	err = g.sendMessage(m1)
+	//g.s = StatusEstablished
+	err = g.fsm.Event(EventSerRecvSyn1, m)
 	if err != nil {
-		g.logger.Error("GConn#syn1MessageHandler : sendMessage1 err", err)
+		g.logger.Error("GConn#syn1MessageHandler : status err", err)
+		return err
 	}
-	g.lis.acceptResult <- &acceptRes{c: g, err: nil}
 	return nil
 }
 
@@ -46,20 +39,11 @@ func (g *GConn) syn2MessageHandler(m *v1.Message) (err error) {
 // fin1MessageHandler
 func (g *GConn) fin1MessageHandler(m *v1.Message) (err error) {
 	go func() {
-		g.s = StatusClosed
-		g.logger.Notice("GConn#fin1MessageHandler : recv FIN1 start")
-		g.finSeqU = m.SeqN()
-		if g.finSeqV == 0 {
-			g.finSeqV = g.random()
-		}
-		g.closeWin()
-		g.logger.Debug("GConn#fin1MessageHandler : close win finish")
-		m.FIN2(g.finSeqV, g.finSeqU+1)
-		err = g.sendMessage(m)
+		err = g.fsm.Event(EventRecvFin1, m)
 		if err != nil {
-			g.logger.Error("GConn#fin1MessageHandler : sendMessage1 err", err)
+			g.logger.Error("GConn#fin1MessageHandler : status err", err)
+			return
 		}
-		g.closeUDPConn()
 	}()
 	return nil
 }
@@ -89,7 +73,7 @@ func (g *GConn) ackMessageHandler(m *v1.Message) (err error) {
 		g.Close()
 		return
 	}
-	return g.sendWin.RecvAck(m.SeqN(), m.AckN(),m.WinSize())
+	return g.sendWin.RecvAck(m.SeqN(), m.AckN(), m.WinSize())
 }
 
 // payloadMessageHandler
