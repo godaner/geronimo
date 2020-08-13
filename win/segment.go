@@ -145,10 +145,10 @@ func (s *segment) TryQResend() (err error) {
 			select {
 			case <-s.qrsr:
 				return
-			case <-time.After(time.Duration(100) * time.Millisecond):
+			case <-time.After(time.Duration(10000) * time.Millisecond):
 				panic("wait quick resend segment result timeout")
 			}
-		case <-time.After(time.Duration(100) * time.Millisecond):
+		case <-time.After(time.Duration(10000) * time.Millisecond):
 			panic("Send quick resend segment signal timeout")
 		}
 	} else {
