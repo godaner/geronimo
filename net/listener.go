@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"github.com/godaner/geronimo/logger"
 	gologging "github.com/godaner/geronimo/logger/go-logging"
-	v1 "github.com/godaner/geronimo/rule/v1"
+	"github.com/godaner/geronimo/rule"
+	msg "github.com/godaner/geronimo/rule"
+	"github.com/godaner/geronimo/rule/fac"
 	"net"
 	"sync"
 )
@@ -25,6 +27,7 @@ func Listen(addr *GAddr, options ...Option) (l net.Listener, err error) {
 		return nil, err
 	}
 	return &GListener{
+		Enc:      opts.Enc,
 		OverBose: opts.OverBose,
 		laddr:    addr,
 		c:        c,
@@ -35,7 +38,6 @@ type GListener struct {
 	sync.Once
 	rmConnLock   sync.RWMutex
 	closeLock    sync.RWMutex
-	OverBose     bool
 	laddr        *GAddr
 	c            *net.UDPConn
 	gcs          *sync.Map //map[string]*GConn
@@ -44,6 +46,9 @@ type GListener struct {
 	closes       *sync.Map
 	closeSignal  chan bool
 	logger       logger.Logger
+	msgFac       *fac.Fac
+	Enc          string
+	OverBose     bool
 }
 type acceptRes struct {
 	c   net.Conn
@@ -58,6 +63,9 @@ func (g *GListener) init() {
 		g.gcs = &sync.Map{} //map[string]*GConn{}
 		g.msgs = &sync.Map{}
 		g.closes = &sync.Map{}
+		g.msgFac = &fac.Fac{
+			Enc: g.Enc,
+		}
 		go func() {
 			bs := make([]byte, udpmss, udpmss)
 			for {
@@ -72,23 +80,23 @@ func (g *GListener) init() {
 						g.logger.Error("GListener : ReadFromUDP err", err)
 						return
 					}
-					m1 := &v1.Message{}
+					m1 := g.msgFac.New()
 					m1.UnMarshall(bs[:n])
 					gcI, _ := g.gcs.Load(rAddr.String())
 					gc, _ := gcI.(*GConn)
-					if gc == nil {
+					if gc == nil && m1.Flag()&rule.FlagSYN1 == rule.FlagSYN1 {
 						// first connect
 						gc = &GConn{
 							UDPConn:  g.c,
 							OverBose: g.OverBose,
+							Enc:      g.Enc,
 							raddr:    fromUDPAddr(rAddr),
 							laddr:    fromUDPAddr(g.c.LocalAddr().(*net.UDPAddr)),
-							s:        StatusListen,
 							f:        FListen,
 							lis:      g,
 						}
 						g.gcs.Store(rAddr.String(), gc)
-						msg := make(chan *v1.Message, msgQSize)
+						msg := make(chan msg.Message, msgQSize)
 						g.msgs.Store(rAddr.String(), msg)
 						closeS := make(chan bool)
 						g.closes.Store(rAddr.String(), closeS)
@@ -109,7 +117,7 @@ func (g *GListener) init() {
 					}
 					g.logger.Debug("GListener#init : recv msg from", rAddr.String(), ", msg flag is ", m1.Flag())
 					msgI, _ := g.msgs.Load(rAddr.String())
-					msg, ok := msgI.(chan *v1.Message)
+					msg, ok := msgI.(chan msg.Message)
 					if !ok {
 						g.logger.Error("GListener#init : msg chan is close")
 						return

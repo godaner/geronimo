@@ -1,5 +1,4 @@
 package rule
-
 type Message interface {
 	UnMarshall(message []byte) (err error)
 	Marshall() []byte
@@ -7,15 +6,13 @@ type Message interface {
 	AttributeByType(byte) []byte
 
 	// op
-	SYN1(seqN uint32)
-	SYN2(seqN, ackN uint32)
-	SYN3(seqN, ackN uint32)
-	FIN1(seqN uint32)
-	FIN2(seqN, ackN uint32)
-	FIN3(seqN, ackN uint32)
-	FIN4(seqN, ackN uint32)
-	ACK(ackN uint32, winSize uint16)
-	PAYLOAD(seqN uint32, payload []byte)
+	SYN1(seqN uint16) (m Message)
+	SYN2(seqN, ackN uint16) (m Message)
+	FIN1(seqN uint16) (m Message)
+	FIN2(seqN, ackN uint16) (m Message)
+	ACK(seqN, ackN, winSize uint16) (m Message)
+	PAYLOAD(seqN uint16, payload []byte) (m Message)
+	KeepAlive() (m Message)
 
 	// from head
 	SeqN() uint16

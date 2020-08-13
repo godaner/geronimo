@@ -1,15 +1,13 @@
 package rule
 
 const (
-	FlagSYN1    = 1 << iota // 1
-	FlagSYN2                // 2
-	FlagSYN3                // 4
-	FlagFIN1                // 8
-	FlagFIN2                // 16
-	FlagFIN3                // 32
-	FlagFIN4                // 64
-	FlagACK                 // 128
-	FlagPAYLOAD             // 256
+	FlagSYN1 = 1 << iota
+	FlagSYN2
+	FlagFIN1
+	FlagFIN2
+	FlagACK
+	FlagPAYLOAD
+	FlagKeepAlive
 )
 
 const (
@@ -24,4 +22,3 @@ type Header interface {
 	WinSize() uint16
 	AttrNum() byte
 }
-

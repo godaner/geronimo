@@ -1,33 +1,28 @@
 package net
 
 import (
+	"errors"
 	"github.com/godaner/geronimo/rule"
-	v1 "github.com/godaner/geronimo/rule/v1"
+	msg "github.com/godaner/geronimo/rule"
+	"time"
 )
 
-type messageHandler func(m *v1.Message) (err error)
+type messageHandler func(m msg.Message) (err error)
 
 // syn1MessageHandler
-func (g *GConn) syn1MessageHandler(m *v1.Message) (err error) {
+func (g *GConn) syn1MessageHandler(m msg.Message) (err error) {
 	g.logger.Notice("GConn#syn1MessageHandler : recv SYN1 start")
-	g.s = StatusEstablished
-	g.synSeqX = m.SeqN()
-	if g.synSeqY == 0 {
-		g.synSeqY = g.random()
-	}
-	g.initWin()
-	m1 := &v1.Message{}
-	m1.SYN2(g.synSeqY, g.synSeqX+1)
-	err = g.sendMessage(m1)
+	//g.s = StatusEstablished
+	err = g.fsm.Event(EventSerRecvSyn1, m)
 	if err != nil {
-		g.logger.Error("GConn#syn1MessageHandler : sendMessage1 err", err)
+		g.logger.Error("GConn#syn1MessageHandler : status err", err)
+		return err
 	}
-	g.lis.acceptResult <- &acceptRes{c: g, err: nil}
 	return nil
 }
 
 // syn2MessageHandler
-func (g *GConn) syn2MessageHandler(m *v1.Message) (err error) {
+func (g *GConn) syn2MessageHandler(m msg.Message) (err error) {
 	g.logger.Notice("GConn#syn2MessageHandler : recv  SYN2 start")
 	g.synSeqY = m.SeqN()
 	if g.synSeqX+1 != m.AckN() {
@@ -35,7 +30,7 @@ func (g *GConn) syn2MessageHandler(m *v1.Message) (err error) {
 		return
 	}
 	select {
-	case g.syn1Finish <- true:
+	case g.syn1Finish <- struct{}{}:
 	default:
 		g.logger.Warning("GConn#syn2MessageHandler : there are no syn1Finish suber")
 		return
@@ -44,28 +39,19 @@ func (g *GConn) syn2MessageHandler(m *v1.Message) (err error) {
 }
 
 // fin1MessageHandler
-func (g *GConn) fin1MessageHandler(m *v1.Message) (err error) {
+func (g *GConn) fin1MessageHandler(m msg.Message) (err error) {
 	go func() {
-		g.s = StatusClosed
-		g.logger.Notice("GConn#fin1MessageHandler : recv FIN1 start")
-		g.finSeqU = m.SeqN()
-		if g.finSeqV == 0 {
-			g.finSeqV = g.random()
-		}
-		g.closeWin()
-		g.logger.Debug("GConn#fin1MessageHandler : close win finish")
-		m.FIN2(g.finSeqV, g.finSeqU+1)
-		err = g.sendMessage(m)
+		err = g.fsm.Event(EventRecvFin1, m)
 		if err != nil {
-			g.logger.Error("GConn#fin1MessageHandler : sendMessage1 err", err)
+			g.logger.Error("GConn#fin1MessageHandler : status err", err)
+			return
 		}
-		g.closeUDPConn()
 	}()
 	return nil
 }
 
 // fin2MessageHandler
-func (g *GConn) fin2MessageHandler(m *v1.Message) (err error) {
+func (g *GConn) fin2MessageHandler(m msg.Message) (err error) {
 	g.logger.Notice("GConn#fin2MessageHandler : recv FIN2 start")
 	g.finSeqV = m.SeqN()
 	if m.AckN()-1 != g.finSeqU {
@@ -73,7 +59,7 @@ func (g *GConn) fin2MessageHandler(m *v1.Message) (err error) {
 		return
 	}
 	select {
-	case g.fin1Finish <- true:
+	case g.fin1Finish <- struct{}{}:
 	default:
 		g.logger.Warning("GConn#fin2MessageHandler : there are no fin1Finish suber")
 		return
@@ -82,18 +68,18 @@ func (g *GConn) fin2MessageHandler(m *v1.Message) (err error) {
 }
 
 // ackMessageHandler
-func (g *GConn) ackMessageHandler(m *v1.Message) (err error) {
+func (g *GConn) ackMessageHandler(m msg.Message) (err error) {
 	g.logger.Debug("GConn#ackMessageHandler : start")
 	if g.sendWin == nil {
 		g.logger.Error("GConn＃ackMessageHandler : sendWin is nil")
 		g.Close()
 		return
 	}
-	return g.sendWin.RecvAck(m.SeqN(), m.AckN(),m.WinSize())
+	return g.sendWin.RecvAck(m.SeqN(), m.AckN(), m.WinSize())
 }
 
 // payloadMessageHandler
-func (g *GConn) payloadMessageHandler(m *v1.Message) (err error) {
+func (g *GConn) payloadMessageHandler(m msg.Message) (err error) {
 	g.logger.Debug("GConn#payloadMessageHandler : start")
 	if g.recvWin == nil {
 		g.logger.Error("GConn#payloadMessageHandler : recvWin is nil")
@@ -101,4 +87,15 @@ func (g *GConn) payloadMessageHandler(m *v1.Message) (err error) {
 		return
 	}
 	return g.recvWin.Recv(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
+}
+
+// keepaliveMessageHandler
+func (g *GConn) keepaliveMessageHandler(m msg.Message) (err error) {
+	g.logger.Debug("GConn#keepaliveMessageHandler : start")
+	select {
+	case g.keepaliveC <- struct{}{}:
+		return nil
+	case <-time.After(time.Duration(100) * time.Millisecond):
+		return errors.New("no keepalive handler")
+	}
 }

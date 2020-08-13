@@ -31,15 +31,18 @@ const (
 const (
 	defCongWinSize   = 1
 	defRecWinSize    = 32
-	obDefCongWinSize = 32
-	obDefRecWinSize  = 128
+	maxCongWinSize   = defRecWinSize
+	obDefCongWinSize = 64
+	obDefRecWinSize  = 256
+	obMaxCongWinSize = obDefRecWinSize
 )
 
 const (
 	defSsthresh = 8
+	minSsthresh = 2
 )
 const (
-	mss = 1472 - 14
+	mss = 1472 - 14 - 16 // - protocol len , - vi len
 )
 const (
 	appBufferMSS  = 10
@@ -51,13 +54,13 @@ const (
 	min_rto    = time.Duration(1) * time.Nanosecond
 	max_rto    = time.Duration(500) * time.Millisecond
 	def_rto    = time.Duration(100) * time.Millisecond
-	ob_max_rto = time.Duration(1) * time.Millisecond
+	ob_min_rto = time.Duration(1) * time.Nanosecond
+	ob_max_rto = time.Duration(10) * time.Millisecond
 	ob_def_rto = time.Duration(1) * time.Millisecond
 )
 const (
-	closeTimeout               = time.Duration(5) * time.Second
-	clearReadySendInterval     = time.Duration(100) * time.Millisecond
-	clearReadySendLongInterval = time.Duration(1) * time.Minute // ms
+	closeTimeout           = time.Duration(5) * time.Second
+	clearReadySendInterval = time.Duration(10) * time.Millisecond
 	// flush
 	closeCheckFlushInterval = closeCheckFlushTO / closeCheckFlushNum
 	closeCheckFlushNum      = appBufferMSS * 2 // should ge bq size
@@ -89,9 +92,21 @@ func init() {
 	if max_rto <= min_rto {
 		panic("max_rto <= min_rto")
 	}
-	if ob_max_rto <= min_rto {
-		panic("ob_max_rto <= min_rto")
+	if ob_max_rto <= ob_min_rto {
+		panic("ob_max_rto <= ob_min_rto")
 	}
+	if defCongWinSize != 1 {
+		panic("defCongWinSize !=1")
+	}
+	if minSsthresh > defSsthresh {
+		panic("minSsthresh > defSsthresh")
+	}
+}
+func _maxi64(a, b int64) (c int64) {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 type SWND struct {
@@ -117,7 +132,7 @@ type SWND struct {
 }
 
 // Write
-func (s *SWND) Write(bs []byte) (err error) {
+func (s *SWND) Write(bs []byte, wdl time.Time) (err error) {
 	s.init()
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()
@@ -128,8 +143,11 @@ func (s *SWND) Write(bs []byte) (err error) {
 	default:
 	}
 	s.logger.Info("SWND : write appBuffer , len is", len(bs), ", appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd)
-
-	s.appBuffer.BlockPush(func() {
+	to := make(<-chan time.Time)
+	if !wdl.IsZero() {
+		to = time.After(time.Now().Sub(wdl))
+	}
+	err = s.appBuffer.BlockPushWithSignal(func() {
 		s.Lock()
 		defer s.Unlock()
 		err = s.send(s.readMSS)
@@ -137,7 +155,11 @@ func (s *SWND) Write(bs []byte) (err error) {
 			s.logger.Error("SWND : push event call send err , err is", err)
 			return
 		}
-	}, bs...)
+	}, to, bs...)
+	if err != nil {
+		s.logger.Error("SWND : push data to appBuffer err , err is", err)
+		return err
+	}
 	return nil
 }
 
@@ -182,8 +204,8 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		switch s.OverBose {
 		case true:
 			s.cwnd *= 2
-			if s.cwnd > obDefRecWinSize {
-				s.cwnd = obDefRecWinSize
+			if s.cwnd > obMaxCongWinSize {
+				s.cwnd = obMaxCongWinSize
 			}
 		case false:
 			if s.ssthresh <= s.cwnd {
@@ -191,8 +213,8 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 			} else {
 				s.cwnd *= 2 // slow start
 			}
-			if s.cwnd > defRecWinSize {
-				s.cwnd = defRecWinSize
+			if s.cwnd > maxCongWinSize {
+				s.cwnd = maxCongWinSize
 			}
 		}
 		s.comSendWinSize()
@@ -203,7 +225,7 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		switch s.OverBose {
 		case true:
 		case false:
-			s.ssthresh = s.cwnd / 2
+			s.ssthresh = _maxi64(s.cwnd/2, minSsthresh)
 			s.cwnd = s.ssthresh
 			s.comSendWinSize()
 		}
@@ -216,7 +238,7 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 				s.cwnd = 1
 			}
 		case false:
-			s.ssthresh = s.cwnd / 2
+			s.ssthresh = _maxi64(s.cwnd/2, minSsthresh)
 			s.cwnd = 1
 		}
 		s.comSendWinSize()
@@ -240,7 +262,6 @@ func (s *SWND) init() {
 		}
 		s.logger = gologging.GetLogger(s.String())
 		s.ssthresh = defSsthresh
-		s.swnd = s.cwnd
 		s.tSeq = minSeqN
 		s.hSeq = s.tSeq
 		s.appBuffer = &bq{Size: appBufferSize}
@@ -262,7 +283,9 @@ func (s *SWND) init() {
 			s.rwnd = defRecWinSize
 			s.cwnd = defCongWinSize
 		}
+		s.swnd = s.cwnd
 		s.loopFlush()
+		s.loopPrint()
 	})
 }
 func (s *SWND) trimAckSeg() {
@@ -296,14 +319,14 @@ func (s *SWND) readMSS() (seg *segment) {
 		s.flushTimer.Reset(clearReadySendInterval) // flush after n ms
 		return nil
 	}
-	s.flushTimer.Reset(clearReadySendLongInterval) // no flush
+	s.flushTimer.Stop() // no flush
 	bs := make([]byte, mss, mss)
 	n := s.appBuffer.BlockPop(bs) // todo ?? blockpop ??
 	bs = bs[:n]
 	if len(bs) <= 0 {
 		return nil
 	}
-	return newSSegment(s.logger, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
+	return newSSegment(s.logger, s.OverBose, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
 }
 
 // readAny
@@ -318,7 +341,7 @@ func (s *SWND) readAny() (seg *segment) {
 	if len(bs) <= 0 {
 		return nil
 	}
-	return newSSegment(s.logger, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
+	return newSSegment(s.logger, s.OverBose, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
 }
 
 // send
@@ -395,8 +418,8 @@ func (s *SWND) comRTO(rttm float64) {
 	s.rto = s.rtts + 4*s.rttd
 	switch s.OverBose {
 	case true:
-		if s.rto < min_rto {
-			s.rto = min_rto
+		if s.rto < ob_min_rto {
+			s.rto = ob_min_rto
 		}
 		if s.rto > ob_max_rto {
 			s.rto = ob_max_rto
@@ -475,4 +498,18 @@ func (s *SWND) waitLastAck() {
 		}
 
 	}
+}
+
+// loopPrint
+func (s *SWND) loopPrint() {
+	go func() {
+		for {
+			select {
+			case <-s.closeSignal:
+				return
+			case <-time.After(5 * time.Second):
+				s.logger.Info("SWND : loop print , appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", recv win size is", s.rwnd, ", cong win size is", s.cwnd, ", rto is", int64(s.rto))
+			}
+		}
+	}()
 }

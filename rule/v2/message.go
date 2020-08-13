@@ -1,8 +1,9 @@
-package v1
+package v2
 
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/godaner/geronimo/cipher"
 	rule "github.com/godaner/geronimo/rule"
 	"log"
 )
@@ -60,6 +61,7 @@ type Message struct {
 	Header   Header
 	Attr     []Attr
 	AttrMaps map[byte][]byte
+	C        cipher.Cipher
 }
 
 func (m *Message) SeqN() uint16 {
@@ -127,11 +129,11 @@ func (m *Message) Marshall() []byte {
 			log.Printf("Message#Marshall : binary.Recv m.Header.AttrStr err , err is : %v !", err.Error())
 		}
 	}
-	return buf.Bytes()
+	return m.C.Encrypt(buf.Bytes())
 }
 
 func (m *Message) UnMarshall(message []byte) (err error) {
-	buf := bytes.NewBuffer(message)
+	buf := bytes.NewBuffer(m.C.Decrypt(message))
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HSeqN); err != nil {
 		log.Printf("Message#UnMarshall : binary.Readm.Header.HSeqN err , err is : %v !", err.Error())
 		return err

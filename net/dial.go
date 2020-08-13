@@ -17,6 +17,7 @@ func Dial(raddr *GAddr, options ...Option) (c *GConn, err error) {
 	gc := &GConn{
 		UDPConn:  conn,
 		OverBose: opts.OverBose,
+		Enc:      opts.Enc,
 		laddr:    fromUDPAddr(conn.LocalAddr().(*net.UDPAddr)),
 		raddr:    raddr,
 		f:        FDial,

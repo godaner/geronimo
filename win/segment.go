@@ -9,7 +9,7 @@ import (
 
 const (
 	quickResendIfAckGEN = 3
-	maxResendC          = 15
+	maxResendC          = 10
 )
 
 var (
@@ -35,24 +35,25 @@ type SegmentSender func(seq uint16, bs []byte) (err error)
 // segment
 type segment struct {
 	sync.RWMutex
-	rto    time.Duration // time.Duration
-	bs     []byte        // payload
-	seq    uint16        // seq
-	rsc    uint32        // resend count
-	ackc   uint16        // ack count , for quick resend
-	acked  bool          // is ack ?
-	qrs    chan struct{} // for quick resend
-	qrsr   chan struct{} // for quick resend result
-	fs     chan struct{} // for ack segment
-	fsr    chan struct{} // for ack segment result
-	t      *time.Timer
-	logger logger.Logger
-	es     eventSender
-	ss     SegmentSender // ss
+	rto      time.Duration // time.Duration
+	overBose bool
+	bs       []byte        // payload
+	seq      uint16        // seq
+	rsc      uint32        // resend count
+	ackc     uint16        // ack count , for quick resend
+	acked    bool          // is ack ?
+	qrs      chan struct{} // for quick resend
+	qrsr     chan struct{} // for quick resend result
+	fs       chan struct{} // for ack segment
+	fsr      chan struct{} // for ack segment result
+	t        *time.Timer
+	logger   logger.Logger
+	es       eventSender
+	ss       SegmentSender // ss
 }
 
 // newSSegment
-func newSSegment(logger logger.Logger, seq uint16, bs []byte, rto time.Duration, es eventSender, sender SegmentSender) (s *segment) {
+func newSSegment(logger logger.Logger, overBose bool, seq uint16, bs []byte, rto time.Duration, es eventSender, sender SegmentSender) (s *segment) {
 	return &segment{
 		rto:    rto,
 		bs:     bs,
@@ -72,6 +73,7 @@ func newSSegment(logger logger.Logger, seq uint16, bs []byte, rto time.Duration,
 		},
 	}
 }
+
 // newRSegment
 func newRSegment(seqN uint16, bs []byte) (rs *segment) {
 	return &segment{
@@ -221,10 +223,20 @@ func (s *segment) resend() (err error) {
 // incRTO
 func (s *segment) incRTO() {
 	s.rto = 2 * s.rto
-	if s.rto < min_rto {
-		s.rto = min_rto
-	}
-	if s.rto > max_rto {
-		s.rto = max_rto
+	switch s.overBose {
+	case true:
+		if s.rto < ob_min_rto {
+			s.rto = ob_min_rto
+		}
+		if s.rto > ob_max_rto {
+			s.rto = ob_max_rto
+		}
+	case false:
+		if s.rto < min_rto {
+			s.rto = min_rto
+		}
+		if s.rto > max_rto {
+			s.rto = max_rto
+		}
 	}
 }
