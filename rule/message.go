@@ -1,7 +1,8 @@
 package rule
+
 type Message interface {
 	UnMarshall(message []byte) (err error)
-	Marshall() []byte
+	Marshall() (bs []byte, err error)
 	Attribute(int) Attr
 	AttributeByType(byte) []byte
 

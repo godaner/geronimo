@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	rule "github.com/godaner/geronimo/rule"
-	"log"
 )
 
 // Header
@@ -89,67 +88,61 @@ func (m *Message) AttributeByType(t byte) []byte {
 func (m *Message) Attribute(index int) rule.Attr {
 	return &m.Attr[index]
 }
-func (m *Message) Marshall() []byte {
+func (m *Message) Marshall() (bs []byte, err error) {
 	buf := new(bytes.Buffer)
-	var err error
 	err = binary.Write(buf, binary.BigEndian, m.Header.HSeqN)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.Recv m.Header.HSeqN err , err is : %v !", err.Error())
+		return nil, err
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HAckN)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.Recv m.Header.HAckN err , err is : %v !", err.Error())
+		return nil, err
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HFlag)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.Recv m.Header.HFlag err , err is : %v !", err.Error())
+		return nil, err
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HWinSize)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.Recv m.Header.HWinSize err , err is : %v !", err.Error())
+		return nil, err
 	}
 	err = binary.Write(buf, binary.BigEndian, m.Header.HAttrNum)
 	if err != nil {
-		log.Printf("Message#Marshall : binary.Recv m.Header.AttrNum err , err is : %v !", err.Error())
+		return nil, err
 	}
 	for _, v := range m.Attr {
 		err = binary.Write(buf, binary.BigEndian, v.AT)
 		if err != nil {
-			log.Printf("Message#Marshall : binary.Recv m.Header.AttrType err , err is : %v !", err.Error())
+			return nil, err
 		}
 		//be careful
 		err = binary.Write(buf, binary.BigEndian, v.AL+3)
 		if err != nil {
-			log.Printf("Message#Marshall : binary.Recv m.Header.AttrLen err , err is : %v !", err.Error())
+			return nil, err
 		}
 		err = binary.Write(buf, binary.BigEndian, v.AV)
 		if err != nil {
-			log.Printf("Message#Marshall : binary.Recv m.Header.AttrStr err , err is : %v !", err.Error())
+			return nil, err
 		}
 	}
-	return buf.Bytes()
+	return buf.Bytes(), nil
 }
 
 func (m *Message) UnMarshall(message []byte) (err error) {
 	buf := bytes.NewBuffer(message)
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HSeqN); err != nil {
-		log.Printf("Message#UnMarshall : binary.Readm.Header.HSeqN err , err is : %v !", err.Error())
 		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HAckN); err != nil {
-		log.Printf("Message#UnMarshall : binary.Readm.Header.HAckN err , err is : %v !", err.Error())
 		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HFlag); err != nil {
-		log.Printf("Message#UnMarshall : binary.Readm.Header.HFlag err , err is : %v !", err.Error())
 		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HWinSize); err != nil {
-		log.Printf("Message#UnMarshall : binary.Readm.Header.HWinSize err , err is : %v !", err.Error())
 		return err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &m.Header.HAttrNum); err != nil {
-		log.Printf("Message#UnMarshall : binary.Readm.Header.HAttrNum err , err is : %v !", err.Error())
 		return err
 	}
 
@@ -159,18 +152,15 @@ func (m *Message) UnMarshall(message []byte) (err error) {
 		attr := &m.Attr[i]
 		err := binary.Read(buf, binary.BigEndian, &attr.AT)
 		if err != nil {
-			log.Printf("Message#UnMarshall : binary.Read 0 err , err is : %v !", err.Error())
 			return err
 		}
 		err = binary.Read(buf, binary.BigEndian, &attr.AL)
 		if err != nil {
-			log.Printf("Message#UnMarshall : binary.Read 1 err , err is : %v !", err.Error())
 			return err
 		}
 		attr.AL -= 3 //be careful
 		attr.AV = make([]byte, attr.AL)
 		if err := binary.Read(buf, binary.BigEndian, &attr.AV); err != nil {
-			log.Printf("Message#UnMarshall : binary.Read 2 err , err is : %v !", err.Error())
 			return err
 		}
 		m.AttrMaps[attr.AT] = attr.AV

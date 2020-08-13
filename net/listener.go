@@ -81,7 +81,11 @@ func (g *GListener) init() {
 						return
 					}
 					m1 := g.msgFac.New()
-					m1.UnMarshall(bs[:n])
+					err = m1.UnMarshall(bs[:n])
+					if err != nil {
+						g.logger.Error("GListener : UnMarshall err", err)
+						return
+					}
 					gcI, _ := g.gcs.Load(rAddr.String())
 					gc, _ := gcI.(*GConn)
 					if gc == nil && m1.Flag()&rule.FlagSYN1 == rule.FlagSYN1 {

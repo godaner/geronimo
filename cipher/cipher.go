@@ -244,7 +244,11 @@ func (c *cipherr) Decrypt(src []byte) (dst []byte) {
 	c.Lock()
 	defer c.Unlock()
 	n := len(src)
-	dst = make([]byte, n-c.info.ivLen, n-c.info.ivLen)
+	l := n - c.info.ivLen
+	if l <= 0 {
+		return nil
+	}
+	dst = make([]byte, l, l)
 	iv := make([]byte, c.info.ivLen)
 	copy(iv, src[:c.info.ivLen])
 	c.initDecrypt(iv)

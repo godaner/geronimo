@@ -353,7 +353,7 @@ func TestGListener_Close(t *testing.T) {
 		l, err := Listen(&GAddr{
 			IP:   "192.168.6.6",
 			Port: 3333,
-		})
+		},SetOverBose(false),SetEnc("aes-256-cfb@123qwe"))
 		if err != nil {
 			panic(err)
 		}
@@ -383,7 +383,7 @@ func TestGListener_Close(t *testing.T) {
 				c2, err := Dial(&GAddr{
 					IP:   "192.168.6.6",
 					Port: 3333,
-				})
+				},SetOverBose(false),SetEnc("aes-256-cfb@123qwe"))
 				n, err := c2.Write([]byte(hello1))
 				fmt.Println("c w", n, err)
 				bs := make([]byte, len(hello2), len(hello2))
