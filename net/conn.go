@@ -7,7 +7,7 @@ import (
 	gologging "github.com/godaner/geronimo/logger/go-logging"
 	"github.com/godaner/geronimo/rule"
 	msg "github.com/godaner/geronimo/rule"
-	msgn "github.com/godaner/geronimo/rule/new"
+	"github.com/godaner/geronimo/rule/fac"
 	"github.com/godaner/geronimo/win"
 	"github.com/looplab/fsm"
 	"math/rand"
@@ -69,6 +69,7 @@ var (
 type GConn struct {
 	*net.UDPConn
 	OverBose                                                                                     bool
+	Enc                                                                                          string
 	initOnce, toAcceptOnce, keepaliveOnce, initSendWinOnce, initRecvWinOnce, initLoopReadUDPOnce sync.Once
 	f                                                                                            uint8
 	recvWin                                                                                      *win.RWND
@@ -85,6 +86,7 @@ type GConn struct {
 	logger                                                                                       logger.Logger
 	fsm                                                                                          *fsm.FSM
 	keepaliveTimer                                                                               *time.Timer
+	msgFac                                                                                       *fac.Fac
 }
 
 func (g *GConn) String() string {
@@ -153,6 +155,7 @@ func (g *GConn) init() {
 		g.syn1Finish = make(chan struct{})
 		g.fin1Finish = make(chan struct{})
 		g.keepaliveC = make(chan struct{})
+		g.msgFac = &fac.Fac{Enc: g.Enc}
 		// init message handlers
 		g.mhs = map[uint16]messageHandler{
 			// syn
@@ -195,7 +198,7 @@ func (g *GConn) init() {
 					//block chan struct{},
 					err = func() (err error) {
 						// sync req
-						m1 := msgn.NewMessage()
+						m1 := g.msgFac.New()
 						if g.synSeqX == 0 {
 							//g.synSeqX = uint32(rand.Int31n(2<<16 - 2))
 							g.synSeqX = g.random()
@@ -235,7 +238,7 @@ func (g *GConn) init() {
 						g.synSeqY = g.random()
 					}
 					g.initWin()
-					m1 := msgn.NewMessage()
+					m1 := g.msgFac.New()
 					m1.SYN2(g.synSeqY, g.synSeqX+1)
 					err := g.sendMessage(m1)
 					if err != nil {
@@ -307,7 +310,7 @@ func (g *GConn) init() {
 					err = func() (err error) {
 						g.keepaliveTimer.Stop()
 						g.closeSendWin()
-						m := msgn.NewMessage()
+						m := g.msgFac.New()
 						if g.finSeqU == 0 {
 							g.finSeqU = g.random()
 						}
@@ -361,7 +364,7 @@ func (g *GConn) loopReadUDP() {
 							}
 							return
 						}
-						m := msgn.NewMessage()
+						m := g.msgFac.New()
 						m.UnMarshall(bs[:n])
 						err = g.handleMessage(m)
 						if err != nil {
@@ -392,7 +395,7 @@ func (g *GConn) initRecvWin() {
 			OverBose: g.OverBose,
 			FTag:     g.String(),
 			AckSender: func(seq, ack, receiveWinSize uint16) (err error) {
-				m := msgn.NewMessage()
+				m := g.msgFac.New()
 				m.ACK(seq, ack, receiveWinSize)
 				return g.sendMessage(m)
 			},
@@ -408,7 +411,7 @@ func (g *GConn) initSendWin() {
 			FTag:     g.String(),
 			SegmentSender: func(seq uint16, bs []byte) (err error) {
 				// send udp
-				m := msgn.NewMessage()
+				m := g.msgFac.New()
 				m.PAYLOAD(seq, bs)
 				return g.sendMessage(m)
 			},
@@ -423,7 +426,7 @@ func (g *GConn) handleMessage(m msg.Message) (err error) {
 	if ok && mh != nil {
 		return mh(m)
 	}
-	g.logger.Warning("GConn#handleMessage : no message handler be found , flag is", m.Flag(), ", conn status is", g.fsm.Current(), ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
+	g.logger.Error("GConn#handleMessage : no message handler be found , flag is", m.Flag(), ", conn status is", g.fsm.Current(), ", flag is", strconv.FormatUint(uint64(m.Flag()), 2))
 	panic("no handler")
 }
 
@@ -551,7 +554,7 @@ func (g *GConn) keepalive() {
 			for {
 				select {
 				case <-time.After(keepalive):
-					err := g.sendMessage(msgn.NewMessage().KeepAlive())
+					err := g.sendMessage(g.msgFac.New().KeepAlive())
 					if err != nil {
 						g.logger.Error("GConn#keepalive : send keepalive err", err)
 						g.Close()

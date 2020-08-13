@@ -42,7 +42,7 @@ const (
 	minSsthresh = 2
 )
 const (
-	mss = 1472 - 14
+	mss = 1472 - 14 - 16 // - protocol len , - vi len
 )
 const (
 	appBufferMSS  = 10

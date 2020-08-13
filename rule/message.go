@@ -1,5 +1,4 @@
 package rule
-
 type Message interface {
 	UnMarshall(message []byte) (err error)
 	Marshall() []byte
