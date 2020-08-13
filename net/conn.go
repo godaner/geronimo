@@ -68,22 +68,23 @@ var (
 
 type GConn struct {
 	*net.UDPConn
-	OverBose                                                                       bool
-	initOnce, keepaliveOnce, initSendWinOnce, initRecvWinOnce, initLoopReadUDPOnce sync.Once
-	f                                                                              uint8
-	recvWin                                                                        *win.RWND
-	sendWin                                                                        *win.SWND
-	raddr                                                                          *GAddr
-	laddr                                                                          *GAddr
-	lis                                                                            *GListener
-	synSeqX, synSeqY, finSeqU, finSeqV                                             uint16
-	syn1Finish, fin1Finish                                                         chan struct{}
-	syn1ResendCount, fin1ResendCount                                               uint8
-	rdl, wdl                                                                       time.Time
-	keepaliveC                                                                     chan struct{}
-	mhs                                                                            map[uint16]messageHandler
-	logger                                                                         logger.Logger
-	fsm                                                                            *fsm.FSM
+	OverBose                                                                                     bool
+	initOnce, toAcceptOnce, keepaliveOnce, initSendWinOnce, initRecvWinOnce, initLoopReadUDPOnce sync.Once
+	f                                                                                            uint8
+	recvWin                                                                                      *win.RWND
+	sendWin                                                                                      *win.SWND
+	raddr                                                                                        *GAddr
+	laddr                                                                                        *GAddr
+	lis                                                                                          *GListener
+	synSeqX, synSeqY, finSeqU, finSeqV                                                           uint16
+	syn1Finish, fin1Finish                                                                       chan struct{}
+	syn1ResendCount, fin1ResendCount                                                             uint8
+	rdl, wdl                                                                                     time.Time
+	keepaliveC                                                                                   chan struct{}
+	mhs                                                                                          map[uint16]messageHandler
+	logger                                                                                       logger.Logger
+	fsm                                                                                          *fsm.FSM
+	keepaliveTimer                                                                               *time.Timer
 }
 
 func (g *GConn) String() string {
@@ -242,7 +243,8 @@ func (g *GConn) init() {
 					}
 					// keepalive
 					g.keepalive()
-					g.lis.acceptResult <- &acceptRes{c: g, err: nil}
+					// to accept
+					g.toAccept()
 				},
 				StatusCliEstablished: func(event *fsm.Event) {
 					// init window
@@ -303,6 +305,7 @@ func (g *GConn) init() {
 						}
 					}()
 					err = func() (err error) {
+						g.keepaliveTimer.Stop()
 						g.closeSendWin()
 						m := msgn.NewMessage()
 						if g.finSeqU == 0 {
@@ -541,15 +544,14 @@ func (g *GConn) close() (err error) {
 
 // keepalive
 func (g *GConn) keepalive() {
+	g.keepaliveTimer = time.NewTimer(keepaliveTo)
 	g.keepaliveOnce.Do(func() {
 		// send keepalive
 		go func() {
 			for {
 				select {
 				case <-time.After(keepalive):
-					m := msgn.NewMessage()
-					m.KeepAlive()
-					err := g.sendMessage(m)
+					err := g.sendMessage(msgn.NewMessage().KeepAlive())
 					if err != nil {
 						g.logger.Error("GConn#keepalive : send keepalive err", err)
 						g.Close()
@@ -561,16 +563,14 @@ func (g *GConn) keepalive() {
 
 		// recv keepalive
 		go func() {
-			keepaliveTimer := time.NewTimer(keepaliveTo)
 			for {
 				select {
-				case <-keepaliveTimer.C:
-					keepaliveTimer.Stop()
+				case <-g.keepaliveTimer.C:
 					g.logger.Error("GConn#keepalive : keepalive timeout")
 					g.Close()
 					return
 				case <-g.keepaliveC:
-					keepaliveTimer.Reset(keepaliveTo)
+					g.keepaliveTimer.Reset(keepaliveTo)
 					continue
 				}
 			}
@@ -586,4 +586,11 @@ func (g *GConn) wait2msl() {
 		<-time.After(2 * msl)
 		g.closeUDPConn()
 	}()
+}
+
+// toAccept
+func (g *GConn) toAccept() {
+	g.toAcceptOnce.Do(func() {
+		g.lis.acceptResult <- &acceptRes{c: g, err: nil}
+	})
 }

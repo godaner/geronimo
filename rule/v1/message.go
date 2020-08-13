@@ -61,6 +61,7 @@ type Message struct {
 	Attr     []Attr
 	AttrMaps map[byte][]byte
 }
+
 func (m *Message) SeqN() uint16 {
 	return m.Header.SeqN()
 }
@@ -178,26 +179,31 @@ func (m *Message) UnMarshall(message []byte) (err error) {
 	return nil
 }
 
-func (m *Message) SYN1(seqN uint16) {
+func (m *Message) SYN1(seqN uint16) (mm rule.Message) {
 	m.newMessage(rule.FlagSYN1, seqN, 0, 0)
+	return m
 }
 
-func (m *Message) SYN2(seqN, ackN uint16) {
+func (m *Message) SYN2(seqN, ackN uint16) (mm rule.Message) {
 	m.newMessage(rule.FlagSYN2, seqN, ackN, 0)
+	return m
 }
 
-func (m *Message) FIN1(seqN uint16) {
+func (m *Message) FIN1(seqN uint16) (mm rule.Message) {
 	m.newMessage(rule.FlagFIN1, seqN, 0, 0)
+	return m
 }
 
-func (m *Message) FIN2(seqN, ackN uint16) {
+func (m *Message) FIN2(seqN, ackN uint16) (mm rule.Message) {
 	m.newMessage(rule.FlagFIN2, seqN, ackN, 0)
+	return m
 }
 
-func (m *Message) ACK(seqN, ackN, winSize uint16) {
+func (m *Message) ACK(seqN, ackN, winSize uint16) (mm rule.Message) {
 	m.newMessage(rule.FlagACK, seqN, ackN, winSize)
+	return m
 }
-func (m *Message) PAYLOAD(seqN uint16, payload []byte) {
+func (m *Message) PAYLOAD(seqN uint16, payload []byte) (mm rule.Message) {
 	m.newMessage(rule.FlagPAYLOAD, seqN, 0, 0)
 	m.Attr = []Attr{
 		{
@@ -205,9 +211,11 @@ func (m *Message) PAYLOAD(seqN uint16, payload []byte) {
 		},
 	}
 	m.Header.HAttrNum = byte(len(m.Attr))
+	return m
 }
-func (m *Message) KeepAlive() {
+func (m *Message) KeepAlive() (mm rule.Message) {
 	m.newMessage(rule.FlagKeepAlive, 0, 0, 0)
+	return m
 }
 
 func (m *Message) newMessage(flag, seqN, ackN uint16, winSize uint16) {
