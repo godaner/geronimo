@@ -544,8 +544,8 @@ func (g *GConn) close() (err error) {
 
 // keepalive
 func (g *GConn) keepalive() {
-	g.keepaliveTimer = time.NewTimer(keepaliveTo)
 	g.keepaliveOnce.Do(func() {
+		g.keepaliveTimer = time.NewTimer(keepaliveTo)
 		// send keepalive
 		go func() {
 			for {
