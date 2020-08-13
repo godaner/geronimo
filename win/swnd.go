@@ -31,12 +31,15 @@ const (
 const (
 	defCongWinSize   = 1
 	defRecWinSize    = 32
+	maxCongWinSize   = defRecWinSize
 	obDefCongWinSize = 64
 	obDefRecWinSize  = 256
+	obMaxCongWinSize = obDefRecWinSize
 )
 
 const (
 	defSsthresh = 8
+	minSsthresh = 2
 )
 const (
 	mss = 1472 - 14
@@ -56,8 +59,8 @@ const (
 	ob_def_rto = time.Duration(1) * time.Millisecond
 )
 const (
-	closeTimeout               = time.Duration(5) * time.Second
-	clearReadySendInterval     = time.Duration(10) * time.Millisecond
+	closeTimeout           = time.Duration(5) * time.Second
+	clearReadySendInterval = time.Duration(10) * time.Millisecond
 	// flush
 	closeCheckFlushInterval = closeCheckFlushTO / closeCheckFlushNum
 	closeCheckFlushNum      = appBufferMSS * 2 // should ge bq size
@@ -92,6 +95,18 @@ func init() {
 	if ob_max_rto <= ob_min_rto {
 		panic("ob_max_rto <= ob_min_rto")
 	}
+	if defCongWinSize != 1 {
+		panic("defCongWinSize !=1")
+	}
+	if minSsthresh > defSsthresh {
+		panic("minSsthresh > defSsthresh")
+	}
+}
+func _maxi64(a, b int64) (c int64) {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 type SWND struct {
@@ -189,8 +204,8 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		switch s.OverBose {
 		case true:
 			s.cwnd *= 2
-			if s.cwnd > obDefRecWinSize {
-				s.cwnd = obDefRecWinSize
+			if s.cwnd > obMaxCongWinSize {
+				s.cwnd = obMaxCongWinSize
 			}
 		case false:
 			if s.ssthresh <= s.cwnd {
@@ -198,8 +213,8 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 			} else {
 				s.cwnd *= 2 // slow start
 			}
-			if s.cwnd > defRecWinSize {
-				s.cwnd = defRecWinSize
+			if s.cwnd > maxCongWinSize {
+				s.cwnd = maxCongWinSize
 			}
 		}
 		s.comSendWinSize()
@@ -210,10 +225,7 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		switch s.OverBose {
 		case true:
 		case false:
-			s.ssthresh = s.cwnd / 2
-			if s.ssthresh <= 0 {
-				s.ssthresh = 1
-			}
+			s.ssthresh = _maxi64(s.cwnd/2, minSsthresh)
 			s.cwnd = s.ssthresh
 			s.comSendWinSize()
 		}
@@ -226,10 +238,7 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 				s.cwnd = 1
 			}
 		case false:
-			s.ssthresh = s.cwnd / 2
-			if s.ssthresh <= 0 {
-				s.ssthresh = 1
-			}
+			s.ssthresh = _maxi64(s.cwnd/2, minSsthresh)
 			s.cwnd = 1
 		}
 		s.comSendWinSize()
@@ -490,10 +499,11 @@ func (s *SWND) waitLastAck() {
 
 	}
 }
+
 // loopPrint
 func (s *SWND) loopPrint() {
 	go func() {
-		for;;{
+		for {
 			select {
 			case <-s.closeSignal:
 				return
