@@ -432,20 +432,24 @@ func (g *GConn) handleMessage(m msg.Message) (err error) {
 
 // sendMessage
 func (g *GConn) sendMessage(m msg.Message) (err error) {
-	b := m.Marshall()
+	b,err := m.Marshall()
+	if err!=nil{
+		g.logger.Error("GConn#sendMessage Marshall err", err)
+		return
+	}
 	if g.f == FDial {
-		g.logger.Debug("GConn : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String(), ", flag is", m.Flag())
+		g.logger.Debug("GConn#sendMessage : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String(), ", flag is", m.Flag())
 		_, err = g.UDPConn.Write(b)
 		if err != nil {
-			g.logger.Error("GConn : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String(), ", flag is", m.Flag(), " err", err)
+			g.logger.Error("GConn#sendMessage : FDial udp from ", g.UDPConn.LocalAddr().String(), " to", g.UDPConn.RemoteAddr().String(), ", flag is", m.Flag(), " err", err)
 		}
 		return err
 	}
 	if g.f == FListen {
-		g.logger.Debug("GConn : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String(), ", flag is", m.Flag())
+		g.logger.Debug("GConn#sendMessage : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String(), ", flag is", m.Flag())
 		_, err = g.UDPConn.WriteToUDP(b, g.raddr.toUDPAddr())
 		if err != nil {
-			g.logger.Error("GConn : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String(), ", flag is", m.Flag(), " err", err)
+			g.logger.Error("GConn#sendMessage : FListen udp from ", g.UDPConn.LocalAddr().String(), " to", g.raddr.toUDPAddr().String(), ", flag is", m.Flag(), " err", err)
 			panic("listener write err , err is : " + err.Error())
 		}
 		return err
