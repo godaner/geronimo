@@ -55,8 +55,8 @@ const (
 	max_rto    = time.Duration(500) * time.Millisecond
 	def_rto    = time.Duration(100) * time.Millisecond
 	ob_min_rto = time.Duration(1) * time.Nanosecond
-	ob_max_rto = time.Duration(50) * time.Millisecond
-	ob_def_rto = time.Duration(1) * time.Millisecond
+	ob_max_rto = time.Duration(500) * time.Millisecond
+	ob_def_rto = time.Duration(5) * time.Millisecond
 )
 const (
 	closeTimeout           = time.Duration(5) * time.Second
@@ -216,8 +216,8 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 				s.cwnd = maxCongWinSize
 			}
 		}
-		s.comSendWinSize()
 		s.comRTO(float64(ec.rttm))
+		s.comSendWinSize()
 		s.logger.Info("SWND : segment ack rttm is", ec.rttm, ", rto is", s.rto)
 		return nil
 	case EventQResend:
@@ -412,18 +412,19 @@ func (s *SWND) Close() (err error) {
 
 // comRTO
 func (s *SWND) comRTO(rttm float64) {
-	s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
-	s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttm-float64(s.rtts)))
-	s.rto = s.rtts + 4*s.rttd
 	switch s.OverBose {
 	case true:
-		if s.rto < ob_min_rto {
-			s.rto = ob_min_rto
-		}
-		if s.rto > ob_max_rto {
-			s.rto = ob_max_rto
-		}
+		s.rto = ob_def_rto
+		//if s.rto < ob_min_rto {
+		//	s.rto = ob_min_rto
+		//}
+		//if s.rto > ob_max_rto {
+		//	s.rto = ob_max_rto
+		//}
 	case false:
+		s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
+		s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttm-float64(s.rtts)))
+		s.rto = s.rtts + 4*s.rttd
 		if s.rto < min_rto {
 			s.rto = min_rto
 		}
@@ -431,7 +432,6 @@ func (s *SWND) comRTO(rttm float64) {
 			s.rto = max_rto
 		}
 	}
-
 }
 
 // flushLastSegment

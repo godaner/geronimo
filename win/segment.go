@@ -13,8 +13,8 @@ const (
 	obMaxResendC        = 15
 )
 const (
-	obincrto = 2.0
-	incrto   = 2.0
+	obincrto = 2
+	incrto   = 2
 )
 
 var (
