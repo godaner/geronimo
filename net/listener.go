@@ -10,7 +10,6 @@ import (
 	"github.com/godaner/geronimo/rule/fac"
 	"net"
 	"sync"
-	"time"
 )
 
 const (
@@ -125,11 +124,16 @@ func (g *GListener) init() {
 						g.logger.Error("GListener#init : msg chan is close")
 						return
 					}
+					csI, ok := g.closes.Load(rAddr.String())
+					if !ok {
+						return
+					}
+					cs := csI.(chan struct{})
 					select {
 					case msg <- m1:
 						return
-						case <-time.After(time.Duration(10) * time.Millisecond):
-							panic("send msg timeout")
+					case <-cs:
+						return
 					}
 				}()
 			}
