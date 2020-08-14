@@ -306,7 +306,6 @@ func (g *GConn) init() {
 						}
 					}()
 					err = func() (err error) {
-						g.keepaliveTimer.Stop()
 						g.closeSendWin()
 						m := g.MsgFac.New()
 						if g.finSeqU == 0 {
@@ -572,6 +571,7 @@ func (g *GConn) keepalive() {
 				select {
 				case <-g.keepaliveTimer.C:
 					g.logger.Error("GConn#keepalive : keepalive timeout")
+					g.keepaliveTimer.Stop()
 					g.Close()
 					return
 				case <-g.keepaliveC:
