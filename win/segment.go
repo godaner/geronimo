@@ -12,6 +12,10 @@ const (
 	maxResendC          = 10
 	obMaxResendC        = 15
 )
+const (
+	obincrto = 2.0
+	incrto   = 2.0
+)
 
 var (
 	errResendTo = errors.New("segment resend timeout")
@@ -245,7 +249,7 @@ func (s *segment) resend() (err error) {
 func (s *segment) incRTO() {
 	switch s.overBose {
 	case true:
-		s.rto = time.Duration(1.25 * float64(s.rto))
+		s.rto = time.Duration(obincrto * float64(s.rto))
 		if s.rto < ob_min_rto {
 			s.rto = ob_min_rto
 		}
@@ -253,7 +257,7 @@ func (s *segment) incRTO() {
 			s.rto = ob_max_rto
 		}
 	case false:
-		s.rto = 2 * s.rto
+		s.rto = time.Duration(incrto * float64(s.rto))
 		if s.rto < min_rto {
 			s.rto = min_rto
 		}
