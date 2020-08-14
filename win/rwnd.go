@@ -22,9 +22,8 @@ import (
 // seq =     0       1       2      3       4       5       0       1        2         3         4
 //
 // index =   0       1       2      3       4       5       6       7        8         9         10
-
 var (
-	ErrRWNDClosed = errors.New("rwnd closed")
+	errRClosed = errors.New("rwnd closed")
 )
 
 type AckSender func(seqN, ack, receiveWinSize uint16) (err error)
@@ -67,7 +66,7 @@ func (r *RWND) Read(bs []byte, rdl time.Time) (n int, err error) {
 	nn, err = r.appBuffer.BlockPopWithSignal(bs, r.closeSignal, to)
 	if err != nil {
 		r.logger.Error("RWND : read data from appBuffer err , err is", err)
-		if err.Error() == ErrStoped.Error() {
+		if err.Error() == errStoped.Error() {
 			return 0, io.EOF
 		}
 		return 0, err
@@ -84,7 +83,7 @@ func (r *RWND) Recv(seqN uint16, bs []byte) (err error) {
 	select {
 	case <-r.closeSignal:
 		r.logger.Warning("RWND : window is closeSignal")
-		return ErrRWNDClosed
+		return errRClosed
 	default:
 	}
 	// illegal seq ?
@@ -141,10 +140,11 @@ func (r *RWND) recved2AppBuffer() (breakk bool) {
 		return true
 	}
 	// put segment data to application buffer
-	err := r.appBuffer.BlockPushWithSignal(nil, make(<-chan time.Time), seg.bs...)
+	// maybe closed , no consumer will block
+	err := r.appBuffer.BlockPushWithSignal(nil, r.closeSignal, make(<-chan time.Time), seg.Bs()...)
 	if err != nil {
-		r.logger.Critical("RWND : recved to appBuffer timeout")
-		return false
+		r.logger.Error("RWND : recved to appBuffer err , err is", err.Error())
+		return true
 	}
 	// delete segment
 	delete(r.recved, r.tailSeq)
@@ -195,6 +195,7 @@ func (r *RWND) Close() (err error) {
 	}
 	return nil
 }
+
 // loopPrint
 func (r *RWND) loopPrint() {
 	go func() {

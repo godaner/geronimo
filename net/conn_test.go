@@ -80,14 +80,14 @@ func s() {
 		panic(err)
 	}
 	//fmt.Println("Dial", conn.Status() == StatusEstablished)
-	info, err := os.Stat("./src1")
+	info, err := os.Stat("./src2")
 	if err != nil {
 		panic(err)
 	}
 	size := info.Size()
 	fmt.Println(size)
 
-	file, err := os.Open("./src1")
+	file, err := os.Open("./src2")
 
 	if err != nil {
 		panic(err)

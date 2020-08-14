@@ -21,8 +21,8 @@ const (
 	udpmss = 1472
 )
 const (
-	keepalive   = time.Duration(30) * time.Second
-	keepaliveTo = 4 * keepalive
+	keepalive   = time.Duration(5) * time.Second
+	keepaliveTo = 6 * keepalive
 )
 const (
 	syn1ResendTime  = time.Duration(500) * time.Millisecond
@@ -69,7 +69,6 @@ var (
 type GConn struct {
 	*net.UDPConn
 	OverBose                                                                                     bool
-	Enc                                                                                          string
 	initOnce, toAcceptOnce, keepaliveOnce, initSendWinOnce, initRecvWinOnce, initLoopReadUDPOnce sync.Once
 	f                                                                                            uint8
 	recvWin                                                                                      *win.RWND
@@ -86,7 +85,7 @@ type GConn struct {
 	logger                                                                                       logger.Logger
 	fsm                                                                                          *fsm.FSM
 	keepaliveTimer                                                                               *time.Timer
-	msgFac                                                                                       *fac.Fac
+	MsgFac                                                                                       *fac.Fac
 }
 
 func (g *GConn) String() string {
@@ -155,7 +154,6 @@ func (g *GConn) init() {
 		g.syn1Finish = make(chan struct{})
 		g.fin1Finish = make(chan struct{})
 		g.keepaliveC = make(chan struct{})
-		g.msgFac = &fac.Fac{Enc: g.Enc}
 		// init message handlers
 		g.mhs = map[uint16]messageHandler{
 			// syn
@@ -198,7 +196,7 @@ func (g *GConn) init() {
 					//block chan struct{},
 					err = func() (err error) {
 						// sync req
-						m1 := g.msgFac.New()
+						m1 := g.MsgFac.New()
 						if g.synSeqX == 0 {
 							//g.synSeqX = uint32(rand.Int31n(2<<16 - 2))
 							g.synSeqX = g.random()
@@ -238,7 +236,7 @@ func (g *GConn) init() {
 						g.synSeqY = g.random()
 					}
 					g.initWin()
-					m1 := g.msgFac.New()
+					m1 := g.MsgFac.New()
 					m1.SYN2(g.synSeqY, g.synSeqX+1)
 					err := g.sendMessage(m1)
 					if err != nil {
@@ -310,7 +308,7 @@ func (g *GConn) init() {
 					err = func() (err error) {
 						g.keepaliveTimer.Stop()
 						g.closeSendWin()
-						m := g.msgFac.New()
+						m := g.MsgFac.New()
 						if g.finSeqU == 0 {
 							g.finSeqU = g.random()
 						}
@@ -364,7 +362,7 @@ func (g *GConn) loopReadUDP() {
 							}
 							return
 						}
-						m := g.msgFac.New()
+						m := g.MsgFac.New()
 						m.UnMarshall(bs[:n])
 						err = g.handleMessage(m)
 						if err != nil {
@@ -395,7 +393,7 @@ func (g *GConn) initRecvWin() {
 			OverBose: g.OverBose,
 			FTag:     g.String(),
 			AckSender: func(seq, ack, receiveWinSize uint16) (err error) {
-				m := g.msgFac.New()
+				m := g.MsgFac.New()
 				m.ACK(seq, ack, receiveWinSize)
 				return g.sendMessage(m)
 			},
@@ -411,7 +409,7 @@ func (g *GConn) initSendWin() {
 			FTag:     g.String(),
 			SegmentSender: func(seq uint16, bs []byte) (err error) {
 				// send udp
-				m := g.msgFac.New()
+				m := g.MsgFac.New()
 				m.PAYLOAD(seq, bs)
 				return g.sendMessage(m)
 			},
@@ -432,8 +430,8 @@ func (g *GConn) handleMessage(m msg.Message) (err error) {
 
 // sendMessage
 func (g *GConn) sendMessage(m msg.Message) (err error) {
-	b,err := m.Marshall()
-	if err!=nil{
+	b, err := m.Marshall()
+	if err != nil {
 		g.logger.Error("GConn#sendMessage Marshall err", err)
 		return
 	}
@@ -558,7 +556,7 @@ func (g *GConn) keepalive() {
 			for {
 				select {
 				case <-time.After(keepalive):
-					err := g.sendMessage(g.msgFac.New().KeepAlive())
+					err := g.sendMessage(g.MsgFac.New().KeepAlive())
 					if err != nil {
 						g.logger.Error("GConn#keepalive : send keepalive err", err)
 						g.Close()

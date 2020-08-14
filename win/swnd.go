@@ -32,7 +32,7 @@ const (
 	defCongWinSize   = 1
 	defRecWinSize    = 32
 	maxCongWinSize   = defRecWinSize
-	obDefCongWinSize = 64
+	obDefCongWinSize = 32
 	obDefRecWinSize  = 256
 	obMaxCongWinSize = obDefRecWinSize
 )
@@ -55,7 +55,7 @@ const (
 	max_rto    = time.Duration(500) * time.Millisecond
 	def_rto    = time.Duration(100) * time.Millisecond
 	ob_min_rto = time.Duration(1) * time.Nanosecond
-	ob_max_rto = time.Duration(10) * time.Millisecond
+	ob_max_rto = time.Duration(50) * time.Millisecond
 	ob_def_rto = time.Duration(1) * time.Millisecond
 )
 const (
@@ -72,8 +72,8 @@ const (
 )
 
 var (
-	ErrSWNDClosed       = errors.New("swnd closed")
-	ErrSWNDCloseTimeout = errors.New("swnd close timeout")
+	errSClosed      = errors.New("swnd closed")
+	errCloseTimeout = errors.New("swnd close timeout")
 )
 
 func init() {
@@ -112,23 +112,22 @@ func _maxi64(a, b int64) (c int64) {
 type SWND struct {
 	sync.Once
 	sync.RWMutex
-	writeLock       sync.RWMutex
-	appBuffer       *bq                 // from app , wait for send
-	sent            map[uint16]*segment // sent segments
-	flushTimer      *time.Timer         // loopFlush not send data
-	swnd            int64               // send window size , swnd = min(cwnd,rwnd)
-	cwnd            int64               // congestion window size
-	rwnd            int64               // receive window size
-	hSeq            uint16              // current head seq , location is head
-	tSeq            uint16              // current tail seq , location is tail
-	ssthresh        int64               // ssthresh
-	rttd, rtts, rto time.Duration
-	closeSignal     chan bool
-	sendFinish      chan bool
-	logger          logger.Logger
-	OverBose        bool
-	SegmentSender   SegmentSender
-	FTag            string
+	writeLock               sync.RWMutex
+	appBuffer               *bq                 // from app , wait for send
+	sent                    map[uint16]*segment // sent segments
+	flushTimer              *time.Timer         // loopFlush not send data
+	swnd                    int64               // send window size , swnd = min(cwnd,rwnd)
+	cwnd                    int64               // congestion window size
+	rwnd                    int64               // receive window size
+	hSeq                    uint16              // current head seq , location is head
+	tSeq                    uint16              // current tail seq , location is tail
+	ssthresh                int64               // ssthresh
+	rttd, rtts, rto         time.Duration
+	sendFinish, closeSignal chan struct{}
+	logger                  logger.Logger
+	OverBose                bool
+	SegmentSender           SegmentSender
+	FTag                    string
 }
 
 // Write
@@ -139,7 +138,7 @@ func (s *SWND) Write(bs []byte, wdl time.Time) (err error) {
 	select {
 	case <-s.closeSignal:
 		s.logger.Warning("SWND : window is closed")
-		return ErrSWNDClosed
+		return errSClosed
 	default:
 	}
 	s.logger.Info("SWND : write appBuffer , len is", len(bs), ", appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd)
@@ -155,7 +154,7 @@ func (s *SWND) Write(bs []byte, wdl time.Time) (err error) {
 			s.logger.Error("SWND : push event call send err , err is", err)
 			return
 		}
-	}, to, bs...)
+	}, s.closeSignal, to, bs...)
 	if err != nil {
 		s.logger.Error("SWND : push data to appBuffer err , err is", err)
 		return err
@@ -200,7 +199,7 @@ func (s *SWND) RecvAck(seq, ack, winSize uint16) (err error) {
 // segmentEvent
 func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 	switch e {
-	case EventFinish:
+	case EventEnd:
 		switch s.OverBose {
 		case true:
 			s.cwnd *= 2
@@ -219,7 +218,7 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		}
 		s.comSendWinSize()
 		s.comRTO(float64(ec.rttm))
-		s.logger.Info("SWND : segment finish rttm is", ec.rttm, ", rto is", s.rto)
+		s.logger.Info("SWND : segment ack rttm is", ec.rttm, ", rto is", s.rto)
 		return nil
 	case EventQResend:
 		switch s.OverBose {
@@ -267,8 +266,8 @@ func (s *SWND) init() {
 		s.appBuffer = &bq{Size: appBufferSize}
 		s.sent = make(map[uint16]*segment)
 		s.flushTimer = time.NewTimer(clearReadySendInterval)
-		s.closeSignal = make(chan bool)
-		s.sendFinish = make(chan bool)
+		s.closeSignal = make(chan struct{})
+		s.sendFinish = make(chan struct{})
 		switch s.OverBose {
 		case true:
 			s.rto = ob_def_rto
@@ -403,7 +402,7 @@ func (s *SWND) Close() (err error) {
 		select {
 		case <-s.sendFinish:
 		case <-time.After(closeTimeout):
-			return ErrSWNDCloseTimeout
+			return errCloseTimeout
 		}
 
 	}

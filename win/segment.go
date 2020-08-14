@@ -10,23 +10,29 @@ import (
 const (
 	quickResendIfAckGEN = 3
 	maxResendC          = 10
+	obMaxResendC        = 15
 )
 
 var (
-	ErrSegmentCantQRS             = errors.New("segment can't quick resend")
-	ErrSegmentCantFin             = errors.New("segment can't ack")
-	ErrSegmentResendBeyondMaxTime = errors.New("segment resend beyond max time")
+	errResendTo = errors.New("segment resend timeout")
 )
 
 const (
 	EventResend event = 1 << iota
 	EventQResend
-	EventFinish
+	EventEnd
+)
+const (
+	EndByAck endBy = 1 << iota
+	EndByResendTo
+	EndByUnknown
 )
 
 type event uint8
+type endBy uint8
 type eContext struct {
-	rttm time.Duration
+	rttm  time.Duration
+	endBy endBy
 }
 type eventSender func(e event, ec *eContext) (err error)
 
@@ -41,32 +47,39 @@ type segment struct {
 	seq      uint16        // seq
 	rsc      uint32        // resend count
 	ackc     uint16        // ack count , for quick resend
-	acked    bool          // is ack ?
 	qrs      chan struct{} // for quick resend
 	qrsr     chan struct{} // for quick resend result
-	fs       chan struct{} // for ack segment
-	fsr      chan struct{} // for ack segment result
+	acks     chan struct{} // for ack segment
+	acksr    chan struct{} // for ack segment result
 	t        *time.Timer
 	logger   logger.Logger
 	es       eventSender
 	ss       SegmentSender // ss
+	acked    chan struct{} // is ack ?
 }
 
 // newSSegment
 func newSSegment(logger logger.Logger, overBose bool, seq uint16, bs []byte, rto time.Duration, es eventSender, sender SegmentSender) (s *segment) {
 	return &segment{
-		rto:    rto,
-		bs:     bs,
-		seq:    seq,
-		rsc:    0,
-		ackc:   0,
-		qrs:    make(chan struct{}),
-		qrsr:   make(chan struct{}),
-		fs:     make(chan struct{}),
-		fsr:    make(chan struct{}),
-		t:      nil,
-		logger: logger,
-		es:     es,
+		overBose: overBose,
+		rto:      rto,
+		bs:       bs,
+		seq:      seq,
+		rsc:      0,
+		ackc:     0,
+		qrs:      make(chan struct{}),
+		qrsr:     make(chan struct{}),
+		acks:     make(chan struct{}),
+		acksr:    make(chan struct{}),
+		acked:    make(chan struct{}),
+		t:        nil,
+		logger:   logger,
+		es: func(e event, ec *eContext) (err error) {
+			if es != nil {
+				return es(e, ec)
+			}
+			return nil
+		},
 		ss: func(seq uint16, bs []byte) (err error) {
 			s.logger.Info("segment : send , seq is [", seq, "] , rto is", s.rto)
 			return sender(seq, bs)
@@ -95,9 +108,16 @@ func (s *segment) Seq() (seq uint16) {
 func (s *segment) IsAck() (y bool) {
 	s.RLock()
 	defer s.RUnlock()
-	return s.acked
+	return s.isAck()
 }
-
+func (s *segment) isAck() (y bool) {
+	select {
+	case _, ok := <-s.acked:
+		return !ok
+	default:
+	}
+	return false
+}
 func (s *segment) Send() (err error) {
 	s.Lock()
 	defer s.Unlock()
@@ -109,23 +129,24 @@ func (s *segment) Send() (err error) {
 func (s *segment) AckIi() (err error) {
 	s.Lock()
 	defer s.Unlock()
-	if s.acked {
+	if s.isAck() {
 		return
 	}
 	select {
-	case <-s.fs: // ack
-		return ErrSegmentCantFin
-	case s.fs <- struct{}{}:
+	case <-s.acked:
+		return
+	case s.acks <- struct{}{}:
 		select {
-		case <-s.fsr:
+		case <-s.acksr:
 			return
 		case <-time.After(time.Duration(10000) * time.Millisecond):
 			panic("wait ack segment result timeout")
-			//return errors.New("wait ack segment result timeout")
 		}
-	case <-time.After(time.Duration(10000) * time.Millisecond):
-		panic("send ack segment signal timeout")
-		//return errors.New("send ack segment signal timeout")
+		//case <-time.After(time.Duration(10000) * time.Millisecond):
+		//	panic("send ack segment signal timeout")
+		//case <-time.After(time.Duration(10) * time.Millisecond):
+		//	s.logger.Warning("segment#AckIi : maybe segment is acked")
+		//	return errAcked
 	}
 }
 
@@ -133,14 +154,14 @@ func (s *segment) AckIi() (err error) {
 func (s *segment) TryQResend() (err error) {
 	s.Lock()
 	defer s.Unlock()
-	if s.acked {
+	if s.isAck() {
 		return
 	}
-	if s.rsc >= quickResendIfAckGEN {
-		s.rsc = 0
+	if s.ackc >= quickResendIfAckGEN {
+		s.ackc = 0
 		select {
-		case <-s.qrs:
-			return ErrSegmentCantQRS
+		case <-s.acked:
+			return
 		case s.qrs <- struct{}{}:
 			select {
 			case <-s.qrsr:
@@ -148,11 +169,14 @@ func (s *segment) TryQResend() (err error) {
 			case <-time.After(time.Duration(10000) * time.Millisecond):
 				panic("wait quick resend segment result timeout")
 			}
-		case <-time.After(time.Duration(10000) * time.Millisecond):
-			panic("Send quick resend segment signal timeout")
+			//case <-time.After(time.Duration(10000) * time.Millisecond):
+			//	panic("send quick resend segment signal timeout")
+			//case <-time.After(time.Duration(10) * time.Millisecond):
+			//	s.logger.Warning("segment#TryQResend : maybe segment is finish")
+			//	return errCantQRS
 		}
 	} else {
-		s.rsc++
+		s.ackc++
 	}
 	return nil
 }
@@ -161,45 +185,35 @@ func (s *segment) TryQResend() (err error) {
 func (s *segment) setResend() {
 	s.t = time.NewTimer(s.rto)
 	rttms := time.Now()
-	select {
-	case <-s.fs:
-		panic("fuck ! who repeat this ?")
-	default:
-	}
 	go func() {
+		endBy := EndByUnknown
 		defer func() {
-			s.t.Stop()
-			close(s.qrs)
-			close(s.fs)
-			s.acked = true
-			s.es(EventFinish, &eContext{
-				rttm: time.Now().Sub(rttms),
-			})
-			s.fsr <- struct{}{}
+			s.endResend(rttms, endBy)
 		}()
 		for {
 			select {
+			//case <-s.acked:
+			//	return
 			case <-s.t.C:
-				s.logger.Info("segment : ticker resend , seq is [", s.seq, "] , rto is", s.rto)
-				//s.Lock() todo
-				err := s.resend()
+				err := s.tickerResend()
 				if err != nil {
-					//s.Unlock()
+					if err == errResendTo {
+						endBy = EndByResendTo
+					}
 					return
 				}
-				s.es(EventResend, &eContext{})
-				//s.Unlock()
 				continue
 			case <-s.qrs:
-				s.logger.Info("segment : quick resend , seq is [", s.seq, "] , rto is", s.rto)
-				err := s.resend()
+				err := s.quickResend()
 				if err != nil {
+					if err == errResendTo {
+						endBy = EndByResendTo
+					}
 					return
 				}
-				s.es(EventQResend, &eContext{})
-				s.qrsr <- struct{}{}
 				continue
-			case <-s.fs:
+			case <-s.acks:
+				endBy = EndByAck
 				return
 			}
 		}
@@ -207,8 +221,15 @@ func (s *segment) setResend() {
 	}()
 }
 func (s *segment) resend() (err error) {
-	if maxResendC < s.rsc {
-		return ErrSegmentResendBeyondMaxTime
+	switch s.overBose {
+	case true:
+		if obMaxResendC < s.rsc {
+			return errResendTo
+		}
+	case false:
+		if maxResendC < s.rsc {
+			return errResendTo
+		}
 	}
 	s.rsc++
 	s.incRTO()
@@ -222,9 +243,9 @@ func (s *segment) resend() (err error) {
 
 // incRTO
 func (s *segment) incRTO() {
-	s.rto = 2 * s.rto
 	switch s.overBose {
 	case true:
+		s.rto = time.Duration(1.25 * float64(s.rto))
 		if s.rto < ob_min_rto {
 			s.rto = ob_min_rto
 		}
@@ -232,11 +253,65 @@ func (s *segment) incRTO() {
 			s.rto = ob_max_rto
 		}
 	case false:
+		s.rto = 2 * s.rto
 		if s.rto < min_rto {
 			s.rto = min_rto
 		}
 		if s.rto > max_rto {
 			s.rto = max_rto
+		}
+	}
+}
+
+// tickerResend
+func (s *segment) tickerResend() (err error) {
+	//defer func() {
+	//	s.es(EventResend, &eContext{})
+	//}()
+	s.logger.Info("segment#tickerResend : ticker resend , seq is [", s.seq, "] , rto is", s.rto)
+	err = s.resend()
+	if err != nil {
+		s.logger.Error("segment#tickerResend : ticker resend err , seq is [", s.seq, "] , rto is", s.rto, ", err is", err.Error())
+		return err
+	}
+	s.es(EventResend, &eContext{})
+	return nil
+}
+
+// quickResend
+func (s *segment) quickResend() (err error) {
+	defer func() {
+		//s.es(EventQResend, &eContext{})
+		select {
+		case s.qrsr <- struct{}{}:
+			return
+		case <-time.After(time.Duration(10000) * time.Millisecond):
+			panic("send segment quick result result signal timeout")
+		}
+	}()
+	s.logger.Info("segment#quickResend : quick resend , seq is [", s.seq, "] , rto is", s.rto)
+	err = s.resend()
+	if err != nil {
+		s.logger.Error("segment#quickResend : quick resend err , seq is [", s.seq, "] , rto is", s.rto, ", err is", err.Error())
+		return err
+	}
+	s.es(EventQResend, &eContext{})
+	return nil
+}
+
+// endResend
+func (s *segment) endResend(rttms time.Time, endBy endBy) {
+	s.t.Stop()
+	close(s.acked)
+	s.es(EventEnd, &eContext{
+		rttm: time.Now().Sub(rttms),
+	})
+	if endBy == EndByAck {
+		select {
+		case s.acksr <- struct{}{}:
+			return
+		case <-time.After(time.Duration(10000) * time.Millisecond):
+			panic("send segment ack result signal timeout")
 		}
 	}
 }
