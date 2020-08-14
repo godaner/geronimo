@@ -56,7 +56,7 @@ const (
 	def_rto    = time.Duration(100) * time.Millisecond
 	ob_min_rto = time.Duration(1) * time.Nanosecond
 	ob_max_rto = time.Duration(500) * time.Millisecond
-	ob_def_rto = time.Duration(5) * time.Millisecond
+	ob_def_rto = time.Duration(10) * time.Millisecond
 )
 const (
 	closeTimeout           = time.Duration(5) * time.Second
