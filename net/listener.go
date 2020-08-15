@@ -27,7 +27,9 @@ func Listen(addr *GAddr, options ...Option) (l net.Listener, err error) {
 		return nil, err
 	}
 	return &GListener{
-		Enc:      opts.Enc,
+		MsgFac: &fac.Fac{
+			Enc: opts.Enc,
+		},
 		OverBose: opts.OverBose,
 		laddr:    addr,
 		c:        c,
@@ -46,8 +48,7 @@ type GListener struct {
 	closes       *sync.Map
 	closeSignal  chan bool
 	logger       logger.Logger
-	msgFac       *fac.Fac
-	Enc          string
+	MsgFac       *fac.Fac
 	OverBose     bool
 }
 type acceptRes struct {
@@ -63,9 +64,6 @@ func (g *GListener) init() {
 		g.gcs = &sync.Map{} //map[string]*GConn{}
 		g.msgs = &sync.Map{}
 		g.closes = &sync.Map{}
-		g.msgFac = &fac.Fac{
-			Enc: g.Enc,
-		}
 		go func() {
 			bs := make([]byte, udpmss, udpmss)
 			for {
@@ -80,7 +78,7 @@ func (g *GListener) init() {
 						g.logger.Error("GListener : ReadFromUDP err", err)
 						return
 					}
-					m1 := g.msgFac.New()
+					m1 := g.MsgFac.New()
 					err = m1.UnMarshall(bs[:n])
 					if err != nil {
 						g.logger.Error("GListener : UnMarshall err", err)
@@ -93,7 +91,7 @@ func (g *GListener) init() {
 						gc = &GConn{
 							UDPConn:  g.c,
 							OverBose: g.OverBose,
-							Enc:      g.Enc,
+							MsgFac:   g.MsgFac,
 							raddr:    fromUDPAddr(rAddr),
 							laddr:    fromUDPAddr(g.c.LocalAddr().(*net.UDPAddr)),
 							f:        FListen,
@@ -102,7 +100,7 @@ func (g *GListener) init() {
 						g.gcs.Store(rAddr.String(), gc)
 						msg := make(chan msg.Message, msgQSize)
 						g.msgs.Store(rAddr.String(), msg)
-						closeS := make(chan bool)
+						closeS := make(chan struct{})
 						g.closes.Store(rAddr.String(), closeS)
 						go func() {
 							for {
@@ -113,7 +111,7 @@ func (g *GListener) init() {
 									err = gc.handleMessage(m)
 									if err != nil {
 										g.logger.Error("GListener#init : handleMessage err", err)
-										return
+										continue
 									}
 								}
 							}
@@ -126,11 +124,16 @@ func (g *GListener) init() {
 						g.logger.Error("GListener#init : msg chan is close")
 						return
 					}
+					csI, ok := g.closes.Load(rAddr.String())
+					if !ok {
+						return
+					}
+					cs := csI.(chan struct{})
 					select {
 					case msg <- m1:
-						//return
-						//case <-time.After(time.Duration(1) * time.Second):
-						//	panic("send msg timeout")
+						return
+					case <-cs:
+						return
 					}
 				}()
 			}
@@ -152,7 +155,7 @@ func (g *GListener) RmGConn(addr interface{}) {
 	if !ok {
 		return
 	}
-	cs := csI.(chan bool)
+	cs := csI.(chan struct{})
 	select {
 	case <-cs:
 		return

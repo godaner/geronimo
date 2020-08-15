@@ -12,8 +12,8 @@ const (
 )
 
 var (
-	ErrStoped  = errors.New("stoped")
-	ErrTimeout = errors.New("timeout")
+	errStoped  = errors.New("bq stoped")
+	errTimeout = errors.New("bq timeout")
 )
 
 type bq struct {
@@ -70,9 +70,9 @@ func (b *bq) BlockPopWithSignal(byt []byte, stop chan struct{}, to <-chan time.T
 	case <-b.readBlock:
 		return b.pop(byt), nil
 	case <-to:
-		return 0, ErrTimeout
+		return 0, errTimeout
 	case <-stop:
-		return 0, ErrStoped
+		return 0, errStoped
 	}
 
 }
@@ -80,14 +80,14 @@ func (b *bq) BlockPopWithSignal(byt []byte, stop chan struct{}, to <-chan time.T
 type pushEvent func()
 
 // BlockPushWithSignal
-func (b *bq) BlockPushWithSignal(e pushEvent, to <-chan time.Time, byt ...byte) (err error) {
+func (b *bq) BlockPushWithSignal(e pushEvent, stop chan struct{}, to <-chan time.Time, byt ...byte) (err error) {
 	b.init()
 	for {
 		bl := uint32(len(byt))
 		if bl <= 0 {
 			return
 		}
-		byt, err = b.push(to, byt...)
+		byt, err = b.push(stop, to, byt...)
 		if err != nil {
 			return err
 		}
@@ -98,10 +98,12 @@ func (b *bq) BlockPushWithSignal(e pushEvent, to <-chan time.Time, byt ...byte) 
 }
 
 // push
-func (b *bq) push(to <-chan time.Time, byt ...byte) (rest []byte, err error) {
+func (b *bq) push(stop chan struct{}, to <-chan time.Time, byt ...byte) (rest []byte, err error) {
 	select {
+	case <-stop:
+		return nil, errStoped
 	case <-to:
-		return nil, ErrTimeout
+		return nil, errTimeout
 	case <-b.writeBlock:
 		b.Lock()
 		l := uint32(len(b.bs))
