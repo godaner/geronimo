@@ -32,7 +32,7 @@ const (
 	defCongWinSize   = 1
 	defRecWinSize    = 32
 	maxCongWinSize   = defRecWinSize
-	obDefCongWinSize = 128
+	obDefCongWinSize = 32
 	obDefRecWinSize  = 256
 	obMaxCongWinSize = obDefRecWinSize
 )

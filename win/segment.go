@@ -11,7 +11,7 @@ const (
 	quickResendIfAckGEN   = 3
 	obQuickResendIfAckGEN = 2
 	maxResendC            = 10
-	obMaxResendC          = 15
+	obMaxResendC          = 25
 )
 const (
 	obincrto = 1.5
@@ -252,11 +252,11 @@ func (s *segment) resend() (err error) {
 	}
 	s.rsc++
 	s.incRTO()
+	s.t.Reset(s.rto)
 	err = s.ss(s.seq, s.bs)
 	if err != nil {
 		return err
 	}
-	s.t.Reset(s.rto)
 	return nil
 }
 
