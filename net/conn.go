@@ -3,10 +3,10 @@ package net
 import (
 	"errors"
 	"fmt"
-	"github.com/godaner/geronimo/logger"
-	gologging "github.com/godaner/geronimo/logger/go-logging"
+	"github.com/godaner/logger"
 	"github.com/godaner/geronimo/rule"
 	msg "github.com/godaner/geronimo/rule"
+	loggerfac "github.com/godaner/logger/factory"
 	"github.com/godaner/geronimo/rule/fac"
 	"github.com/godaner/geronimo/win"
 	"github.com/looplab/fsm"
@@ -25,8 +25,8 @@ const (
 	keepaliveTo = 6 * keepalive
 )
 const (
-	syn1ResendTime  = time.Duration(50) * time.Millisecond
-	fin1ResendTIme  = time.Duration(50) * time.Millisecond
+	syn1ResendTime  = time.Duration(200) * time.Millisecond
+	fin1ResendTIme  = time.Duration(200) * time.Millisecond
 	syn1ResendCount = 10
 	fin1ResendCount = 10
 )
@@ -94,7 +94,6 @@ func (g *GConn) String() string {
 
 func (g *GConn) Read(b []byte) (n int, err error) {
 	g.init()
-
 	if g.Status() != StatusCliEstablished && g.Status() != StatusSerEstablished {
 		return 0, ErrNotEstablished
 	}
@@ -150,7 +149,7 @@ func (g *GConn) Status() (s string) {
 
 func (g *GConn) init() {
 	g.initOnce.Do(func() {
-		g.logger = gologging.GetLogger(g.String())
+		g.logger = loggerfac.LoggerFactory.GetLogger(g.String())
 		g.syn1Finish = make(chan struct{})
 		g.fin1Finish = make(chan struct{})
 		g.keepaliveC = make(chan struct{})
@@ -520,13 +519,13 @@ func (g *GConn) random() uint16 {
 // close
 // fdial or flisten
 func (g *GConn) close() (err error) {
-	g.logger.Notice("GConn#close : start ")
 	block := make(chan error, 1)
 	err = g.fsm.Event(EventClose, block)
 	if err != nil {
-		g.logger.Error("GConn#close : close status err")
+		g.logger.Error("GConn#close : close status err", err)
 		return err
 	}
+	g.logger.Notice("GConn#close : start ")
 	err = <-block
 	if err != nil {
 		g.logger.Error("GConn#close : close err", err)
@@ -543,6 +542,7 @@ func (g *GConn) close() (err error) {
 		g.logger.Error("GConn#close : fin2 status err", err)
 		return err
 	}
+	g.logger.Notice("GConn#close : success ")
 	return nil
 }
 

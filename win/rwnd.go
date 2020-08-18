@@ -3,8 +3,8 @@ package win
 import (
 	"errors"
 	"fmt"
-	"github.com/godaner/geronimo/logger"
-	gologging "github.com/godaner/geronimo/logger/go-logging"
+	"github.com/godaner/logger"
+	loggerfac "github.com/godaner/logger/factory"
 	"io"
 	"sync"
 	"time"
@@ -103,7 +103,7 @@ func (r *RWND) init() {
 		if r.FTag == "" {
 			r.FTag = "nil"
 		}
-		r.logger = gologging.GetLogger(r.String())
+		r.logger = loggerfac.LoggerFactory.GetLogger(r.String())
 		r.tailSeq = minSeqN
 		r.appBuffer = &bq{Size: appBufferSize}
 		r.recved = make(map[uint16]*segment)

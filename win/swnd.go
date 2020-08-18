@@ -3,8 +3,8 @@ package win
 import (
 	"errors"
 	"fmt"
-	"github.com/godaner/geronimo/logger"
-	gologging "github.com/godaner/geronimo/logger/go-logging"
+	"github.com/godaner/logger"
+	loggerfac "github.com/godaner/logger/factory"
 	"math"
 	"sync"
 	"time"
@@ -59,12 +59,10 @@ const (
 	ob_def_rto = time.Duration(50) * time.Millisecond
 )
 const (
-	// close timeout
-	closeTimeout = time.Duration(500) * time.Millisecond
 	// flush
 	closeCheckFlushTO = time.Duration(100) * time.Millisecond
 	// ack
-	closeCheckAckTO = time.Duration(200) * time.Millisecond
+	closeCheckAckTO = time.Duration(2) * time.Second
 )
 const (
 	clearReadySendInterval = time.Duration(10) * time.Millisecond
@@ -258,7 +256,7 @@ func (s *SWND) init() {
 		if s.FTag == "" {
 			s.FTag = "nil"
 		}
-		s.logger = gologging.GetLogger(s.String())
+		s.logger = loggerfac.LoggerFactory.GetLogger(s.String())
 		s.ssthresh = defSsthresh
 		s.tSeq = minSeqN
 		s.hSeq = s.tSeq
@@ -400,7 +398,7 @@ func (s *SWND) Close() (err error) {
 		close(s.closeSignal)
 		select {
 		case <-s.sendFinish:
-		case <-time.After(closeTimeout):
+		case <-time.After(closeCheckAckTO + closeCheckFlushTO):
 			return errCloseTimeout
 		}
 

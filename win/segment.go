@@ -2,7 +2,7 @@ package win
 
 import (
 	"errors"
-	"github.com/godaner/geronimo/logger"
+	"github.com/godaner/logger"
 	"sync"
 	"time"
 )
@@ -11,7 +11,7 @@ const (
 	quickResendIfAckGEN   = 3
 	obQuickResendIfAckGEN = 2
 	maxResendC            = 10
-	obMaxResendC          = 25
+	obMaxResendC          = 12
 )
 const (
 	obincrto = 1.5
@@ -51,7 +51,7 @@ type segment struct {
 	bs       []byte        // payload
 	seq      uint16        // seq
 	rsc      uint32        // resend count
-	ackc     uint16        // ack count , for quick resend
+	ackc     uint8         // ack count , for quick resend
 	qrs      chan struct{} // for quick resend
 	qrsr     chan struct{} // for quick resend result
 	acks     chan struct{} // for ack segment

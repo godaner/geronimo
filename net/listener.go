@@ -3,11 +3,11 @@ package net
 import (
 	"errors"
 	"fmt"
-	"github.com/godaner/geronimo/logger"
-	gologging "github.com/godaner/geronimo/logger/go-logging"
 	"github.com/godaner/geronimo/rule"
 	msg "github.com/godaner/geronimo/rule"
 	"github.com/godaner/geronimo/rule/fac"
+	"github.com/godaner/logger"
+	loggerfac "github.com/godaner/logger/factory"
 	"net"
 	"sync"
 )
@@ -58,7 +58,7 @@ type acceptRes struct {
 
 func (g *GListener) init() {
 	g.Do(func() {
-		g.logger = gologging.GetLogger(fmt.Sprintf("%v%v", "GListener", &g))
+		g.logger = loggerfac.LoggerFactory.GetLogger(fmt.Sprintf("%v%v", "GListener", &g))
 		g.acceptResult = make(chan *acceptRes)
 		g.closeSignal = make(chan bool)
 		g.gcs = &sync.Map{} //map[string]*GConn{}
