@@ -25,10 +25,10 @@ const (
 	keepaliveTo = 6 * keepalive
 )
 const (
-	syn1ResendTime  = time.Duration(500) * time.Millisecond
-	fin1ResendTIme  = time.Duration(500) * time.Millisecond
-	syn1ResendCount = 5
-	fin1ResendCount = 5
+	syn1ResendTime  = time.Duration(50) * time.Millisecond
+	fin1ResendTIme  = time.Duration(50) * time.Millisecond
+	syn1ResendCount = 10
+	fin1ResendCount = 10
 )
 const (
 	StatusInit           = "StatusInit"

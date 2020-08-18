@@ -8,12 +8,13 @@ import (
 )
 
 const (
-	quickResendIfAckGEN = 3
-	maxResendC          = 10
-	obMaxResendC        = 15
+	quickResendIfAckGEN   = 3
+	obQuickResendIfAckGEN = 2
+	maxResendC            = 10
+	obMaxResendC          = 25
 )
 const (
-	obincrto = 2
+	obincrto = 1.5
 	incrto   = 2
 )
 
@@ -161,28 +162,42 @@ func (s *segment) TryQResend() (err error) {
 	if s.isAck() {
 		return
 	}
-	if s.ackc >= quickResendIfAckGEN {
-		s.ackc = 0
-		select {
-		case <-s.acked:
-			return
-		case s.qrs <- struct{}{}:
-			select {
-			case <-s.qrsr:
-				return
-			case <-time.After(time.Duration(10000) * time.Millisecond):
-				panic("wait quick resend segment result timeout")
-			}
-			//case <-time.After(time.Duration(10000) * time.Millisecond):
-			//	panic("send quick resend segment signal timeout")
-			//case <-time.After(time.Duration(10) * time.Millisecond):
-			//	s.logger.Warning("segment#TryQResend : maybe segment is finish")
-			//	return errCantQRS
+	switch s.overBose {
+	case true:
+		if s.ackc >= obQuickResendIfAckGEN {
+			s.ackc = 0
+			s.triggerQResend()
+		} else {
+			s.ackc++
 		}
-	} else {
-		s.ackc++
+
+	case false:
+		if s.ackc >= quickResendIfAckGEN {
+			s.ackc = 0
+			s.triggerQResend()
+		} else {
+			s.ackc++
+		}
 	}
 	return nil
+}
+func (s *segment) triggerQResend() {
+	select {
+	case <-s.acked:
+		return
+	case s.qrs <- struct{}{}:
+		select {
+		case <-s.qrsr:
+			return
+		case <-time.After(time.Duration(10000) * time.Millisecond):
+			panic("wait quick resend segment result timeout")
+		}
+		//case <-time.After(time.Duration(10000) * time.Millisecond):
+		//	panic("send quick resend segment signal timeout")
+		//case <-time.After(time.Duration(10) * time.Millisecond):
+		//	s.logger.Warning("segment#TryQResend : maybe segment is finish")
+		//	return errCantQRS
+	}
 }
 
 // setResend
@@ -237,11 +252,11 @@ func (s *segment) resend() (err error) {
 	}
 	s.rsc++
 	s.incRTO()
+	s.t.Reset(s.rto)
 	err = s.ss(s.seq, s.bs)
 	if err != nil {
 		return err
 	}
-	s.t.Reset(s.rto)
 	return nil
 }
 

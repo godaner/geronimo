@@ -55,20 +55,19 @@ const (
 	max_rto    = time.Duration(500) * time.Millisecond
 	def_rto    = time.Duration(100) * time.Millisecond
 	ob_min_rto = time.Duration(1) * time.Nanosecond
-	ob_max_rto = time.Duration(500) * time.Millisecond
-	ob_def_rto = time.Duration(10) * time.Millisecond
+	ob_max_rto = time.Duration(2000) * time.Millisecond
+	ob_def_rto = time.Duration(50) * time.Millisecond
 )
 const (
-	closeTimeout           = time.Duration(5) * time.Second
-	clearReadySendInterval = time.Duration(10) * time.Millisecond
+	// close timeout
+	closeTimeout = time.Duration(500) * time.Millisecond
 	// flush
-	closeCheckFlushInterval = closeCheckFlushTO / closeCheckFlushNum
-	closeCheckFlushNum      = appBufferMSS * 2 // should ge bq size
-	closeCheckFlushTO       = time.Duration(1000) * time.Millisecond
+	closeCheckFlushTO = time.Duration(100) * time.Millisecond
 	// ack
-	closeCheckAckInterval = closeCheckAckTO / closeCheckAckNum
-	closeCheckAckNum      = appBufferMSS * 2
-	closeCheckAckTO       = time.Duration(3000) * time.Millisecond
+	closeCheckAckTO = time.Duration(200) * time.Millisecond
+)
+const (
+	clearReadySendInterval = time.Duration(10) * time.Millisecond
 )
 
 var (
@@ -439,18 +438,13 @@ func (s *SWND) flushLastSegment() {
 	ft := time.NewTimer(closeCheckFlushTO)
 	defer ft.Stop()
 	// send all
-	sn := 0
 	for {
 		select {
 		case <-ft.C:
-			s.logger.Error("SWND : flushLastSegment flush timeout , flush num is", sn, ", appBuffer len is", s.appBuffer.Len())
-			//panic("flush timeout")
+			s.logger.Error("SWND : flushLastSegment flush timeout , appBuffer len is", s.appBuffer.Len())
 			return
-		case <-time.After(closeCheckFlushInterval):
-			if sn > closeCheckFlushNum {
-				s.logger.Error("SWND : flushLastSegment stopping flush , flush num beynd , flush num is", sn, ", appBuffer len is", s.appBuffer.Len())
-				return
-			}
+			//case <-time.After(5 * time.Millisecond):
+		default:
 			s.Lock()
 			s.logger.Info("SWND : flushLastSegment stopping flush , appBuffer is", s.appBuffer.Len())
 			if s.appBuffer.Len() <= 0 {
@@ -465,8 +459,6 @@ func (s *SWND) flushLastSegment() {
 				return
 			}
 			s.Unlock()
-			sn++
-
 		}
 	}
 }
@@ -476,24 +468,17 @@ func (s *SWND) waitLastAck() {
 	at := time.NewTimer(closeCheckAckTO)
 	defer at.Stop()
 	// recv all ack
-	an := 0
 	for {
 		select {
 		case <-at.C:
-			s.logger.Error("SWND : waitLastAck flush timeout , ack num is", an, ", sentC is", len(s.sent))
-			//panic("flush timeout")
+			s.logger.Error("SWND : waitLastAck flush timeout , sentC is", len(s.sent))
 			return
-		case <-time.After(closeCheckAckInterval):
-			if an > closeCheckAckNum {
-				s.logger.Error("SWND : waitLastAck stopping flush , ack num beynd , ack num is", an)
-				return
-			}
+		case <-time.After(10 * time.Millisecond):
 			s.logger.Info("SWND : waitLastAck stopping flush , sentC is", len(s.sent))
 			if len(s.sent) <= 0 {
 				s.logger.Info("SWND : waitLastAck stopping flush finish , sentC is", len(s.sent))
 				return
 			}
-			an++
 		}
 
 	}
