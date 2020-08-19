@@ -34,8 +34,8 @@ const (
 	defRecWinSize  = 32
 	maxCongWinSize = defRecWinSize
 	// ob
-	obDefCongWinSize = 64
-	obDefRecWinSize  = 64
+	obDefCongWinSize = 256
+	obDefRecWinSize  = 256
 	//obMaxCongWinSize = 32
 	//obMinCongWinSize = 2
 )
@@ -61,8 +61,8 @@ const (
 	def_rto     = time.Duration(100) * time.Millisecond
 	// ob
 	ob_min_rto  = time.Duration(1) * time.Nanosecond
-	ob_max_rto  = time.Duration(2500) * time.Millisecond
-	ob_mmax_rto = time.Duration(30000) * time.Millisecond
+	ob_max_rto  = time.Duration(200) * time.Millisecond
+	ob_mmax_rto = time.Duration(5000) * time.Millisecond
 	ob_def_rto  = time.Duration(30) * time.Millisecond
 )
 const (

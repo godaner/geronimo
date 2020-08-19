@@ -11,11 +11,12 @@ const (
 	quickResendIfAckGEN   = 3
 	obQuickResendIfAckGEN = 3
 	maxResendC            = 10
-	obMaxResendC          = 30
+	obMaxResendC          = 5
 )
 const (
 	obincrto = 0.5
-	incrto   = 2
+	//obincrto = 2
+	incrto = 2
 )
 
 var (
@@ -225,8 +226,10 @@ func (s *segment) setResend() {
 			case <-s.rst.C:
 				err := s.tickerResend()
 				if err != nil {
-					if err == errResendTo {
-						endBy = EndByResendTo
+					if err.Error() == errResendTo.Error() { // can't resend by ticker
+						s.rst.Reset(mmrto * 2)
+						//endBy = EndByResendTo
+						continue
 					}
 					return
 				}
@@ -234,9 +237,6 @@ func (s *segment) setResend() {
 			case <-s.qrs:
 				err := s.quickResend()
 				if err != nil {
-					if err == errResendTo {
-						endBy = EndByResendTo
-					}
 					return
 				}
 				continue
@@ -248,32 +248,13 @@ func (s *segment) setResend() {
 
 	}()
 }
-func (s *segment) resend() (err error) {
-	switch s.overBose {
-	case true:
-		if obMaxResendC < s.rsc {
-			return errResendTo
-		}
-	case false:
-		if maxResendC < s.rsc {
-			return errResendTo
-		}
-	}
-	s.rsc++
-	s.incRTO()
-	s.rst.Reset(s.crto)
-	err = s.ss(s.seq, s.bs)
-	if err != nil {
-		return err
-	}
-	return nil
-}
 
 // incRTO
 func (s *segment) incRTO() {
 	switch s.overBose {
 	case true:
 		s.crto = s.crto + time.Duration(obincrto*float64(s.obfixedrto))
+		//s.crto = time.Duration(obincrto * float64(s.crto))
 		if s.crto < ob_min_rto {
 			s.crto = ob_min_rto
 		}
@@ -293,11 +274,21 @@ func (s *segment) incRTO() {
 
 // tickerResend
 func (s *segment) tickerResend() (err error) {
-	//defer func() {
-	//	s.es(EventResend, &eContext{})
-	//}()
 	s.logger.Info("segment#tickerResend : ticker resend , seq is [", s.seq, "] , crto is", s.crto)
-	err = s.resend()
+	switch s.overBose {
+	case true:
+		if obMaxResendC < s.rsc {
+			return errResendTo
+		}
+	case false:
+		if maxResendC < s.rsc {
+			return errResendTo
+		}
+	}
+	s.rsc++
+	s.incRTO()
+	s.rst.Reset(s.crto)
+	err = s.ss(s.seq, s.bs)
 	if err != nil {
 		s.logger.Error("segment#tickerResend : ticker resend err , seq is [", s.seq, "] , crto is", s.crto, ", err is", err.Error())
 		return err
@@ -318,7 +309,8 @@ func (s *segment) quickResend() (err error) {
 		}
 	}()
 	s.logger.Info("segment#quickResend : quick resend , seq is [", s.seq, "] , crto is", s.crto)
-	err = s.resend()
+	s.rst.Reset(s.crto)
+	err = s.ss(s.seq, s.bs)
 	if err != nil {
 		s.logger.Error("segment#quickResend : quick resend err , seq is [", s.seq, "] , crto is", s.crto, ", err is", err.Error())
 		return err

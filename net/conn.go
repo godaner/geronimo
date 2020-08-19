@@ -23,8 +23,8 @@ const (
 const (
 	keepalive     = time.Duration(10) * time.Second
 	keepaliveTo   = 3 * keepalive
-	obKeepalive   = time.Duration(1) * time.Second
-	obKeepaliveTo = 3 * obKeepalive
+	obKeepalive   = time.Duration(5) * time.Second
+	obKeepaliveTo = 5 * obKeepalive
 )
 const (
 	syn1ResendTime    = time.Duration(100) * time.Millisecond
