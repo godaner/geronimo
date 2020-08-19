@@ -32,7 +32,7 @@ const (
 	defCongWinSize   = 1
 	defRecWinSize    = 32
 	maxCongWinSize   = defRecWinSize
-	obDefCongWinSize = 32
+	obDefCongWinSize = 64
 	obDefRecWinSize  = 256
 	obMaxCongWinSize = obDefRecWinSize
 )
@@ -55,8 +55,8 @@ const (
 	max_rto    = time.Duration(500) * time.Millisecond
 	def_rto    = time.Duration(100) * time.Millisecond
 	ob_min_rto = time.Duration(1) * time.Nanosecond
-	ob_max_rto = time.Duration(2000) * time.Millisecond
-	ob_def_rto = time.Duration(50) * time.Millisecond
+	ob_max_rto = time.Duration(800) * time.Millisecond
+	ob_def_rto = time.Duration(80) * time.Millisecond
 )
 const (
 	// flush
@@ -256,7 +256,7 @@ func (s *SWND) init() {
 		if s.FTag == "" {
 			s.FTag = "nil"
 		}
-		s.logger = loggerfac.LoggerFactory.GetLogger(s.String())
+		s.logger = loggerfac.GetLogger(s.String())
 		s.ssthresh = defSsthresh
 		s.tSeq = minSeqN
 		s.hSeq = s.tSeq

@@ -3,12 +3,12 @@ package net
 import (
 	"errors"
 	"fmt"
-	"github.com/godaner/logger"
 	"github.com/godaner/geronimo/rule"
 	msg "github.com/godaner/geronimo/rule"
-	loggerfac "github.com/godaner/logger/factory"
 	"github.com/godaner/geronimo/rule/fac"
 	"github.com/godaner/geronimo/win"
+	"github.com/godaner/logger"
+	loggerfac "github.com/godaner/logger/factory"
 	"github.com/looplab/fsm"
 	"math/rand"
 	"net"
@@ -21,14 +21,18 @@ const (
 	udpmss = 1472
 )
 const (
-	keepalive   = time.Duration(5) * time.Second
-	keepaliveTo = 6 * keepalive
+	keepalive     = time.Duration(10) * time.Second
+	keepaliveTo   = 3 * keepalive
+	obKeepalive   = time.Duration(1) * time.Second
+	obKeepaliveTo = 3 * obKeepalive
 )
 const (
-	syn1ResendTime  = time.Duration(200) * time.Millisecond
-	fin1ResendTIme  = time.Duration(200) * time.Millisecond
-	syn1ResendCount = 10
-	fin1ResendCount = 10
+	syn1ResendTime    = time.Duration(100) * time.Millisecond
+	syn1MaxResendTime = time.Duration(100) * time.Millisecond
+	fin1ResendTIme    = time.Duration(500) * time.Millisecond
+	fin1MaxResendTIme = time.Duration(500) * time.Millisecond
+	syn1ResendCount   = 10
+	fin1ResendCount   = 10
 )
 const (
 	StatusInit           = "StatusInit"
@@ -149,7 +153,7 @@ func (g *GConn) Status() (s string) {
 
 func (g *GConn) init() {
 	g.initOnce.Do(func() {
-		g.logger = loggerfac.LoggerFactory.GetLogger(g.String())
+		g.logger = loggerfac.GetLogger(g.String())
 		g.syn1Finish = make(chan struct{})
 		g.fin1Finish = make(chan struct{})
 		g.keepaliveC = make(chan struct{})
@@ -209,6 +213,7 @@ func (g *GConn) init() {
 						}
 						// send udp success , mean dst can find , read it
 						g.loopReadUDP()
+						syn1ResendTime := syn1ResendTime
 						for {
 							if g.syn1ResendCount >= syn1ResendCount {
 								return ErrDialTimeout
@@ -218,6 +223,10 @@ func (g *GConn) init() {
 								return nil
 							case <-time.After(syn1ResendTime): // wait ack timeout
 								g.syn1ResendCount++
+								syn1ResendTime *= 2
+								if syn1ResendTime > syn1MaxResendTime {
+									syn1ResendTime = syn1MaxResendTime
+								}
 								err = g.sendMessage(m1)
 								if err != nil {
 									g.logger.Error("GConn#dial : resend SYN1 err , maybe server shutdown now , err is", err)
@@ -249,7 +258,7 @@ func (g *GConn) init() {
 				StatusCliEstablished: func(event *fsm.Event) {
 					// init window
 					g.initWin()
-					// keepalive
+					//keepalive
 					g.keepalive()
 				},
 				StatusClosed: func(event *fsm.Event) {
@@ -316,6 +325,7 @@ func (g *GConn) init() {
 							g.logger.Error("GConn#close send FIN1 err , maybe server shutdown now , err is", err)
 							return ErrNotReachable
 						}
+						fin1ResendTIme := fin1ResendTIme
 						for {
 							if g.fin1ResendCount >= fin1ResendCount {
 								return ErrFINTimeout
@@ -325,6 +335,10 @@ func (g *GConn) init() {
 								return nil
 							case <-time.After(fin1ResendTIme): // wait ack timeout
 								g.fin1ResendCount++
+								fin1ResendTIme *= 2
+								if fin1ResendTIme > fin1MaxResendTIme {
+									fin1ResendTIme = fin1MaxResendTIme
+								}
 								err = g.sendMessage(m)
 								if err != nil {
 									g.logger.Error("GConn#close : send FIN1 err , maybe server shutdown now , err , err is", err)
@@ -548,13 +562,20 @@ func (g *GConn) close() (err error) {
 
 // keepalive
 func (g *GConn) keepalive() {
+	ka := keepalive
+	kt := keepaliveTo
+	switch g.OverBose {
+	case true:
+		ka = obKeepalive
+		kt = obKeepaliveTo
+	}
 	g.keepaliveOnce.Do(func() {
-		g.keepaliveTimer = time.NewTimer(keepaliveTo)
+		g.keepaliveTimer = time.NewTimer(kt)
 		// send keepalive
 		go func() {
 			for {
 				select {
-				case <-time.After(keepalive):
+				case <-time.After(ka):
 					err := g.sendMessage(g.MsgFac.New().KeepAlive())
 					if err != nil {
 						g.logger.Error("GConn#keepalive : send keepalive err", err)
@@ -575,7 +596,7 @@ func (g *GConn) keepalive() {
 					g.Close()
 					return
 				case <-g.keepaliveC:
-					g.keepaliveTimer.Reset(keepaliveTo)
+					g.keepaliveTimer.Reset(kt)
 					continue
 				}
 			}

@@ -103,7 +103,7 @@ func (r *RWND) init() {
 		if r.FTag == "" {
 			r.FTag = "nil"
 		}
-		r.logger = loggerfac.LoggerFactory.GetLogger(r.String())
+		r.logger = loggerfac.GetLogger(r.String())
 		r.tailSeq = minSeqN
 		r.appBuffer = &bq{Size: appBufferSize}
 		r.recved = make(map[uint16]*segment)

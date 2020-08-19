@@ -3,9 +3,10 @@ package net
 import (
 	"crypto/md5"
 	"fmt"
-	gologging "github.com/godaner/geronimo/logger/go-logging"
+	loggerfac "github.com/godaner/logger/factory"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestDial(t *testing.T) {
-	gologging.SetLogger("TestDial")
+	loggerfac.Init("TestDial")
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
 
@@ -130,7 +131,7 @@ func md5S(bs []byte) (s string) {
 }
 func TestGConn_Read(t *testing.T) {
 
-	gologging.SetLogger("TestGConn_Read")
+	loggerfac.Init("TestGConn_Read")
 	go http.ListenAndServe(":8888", nil)
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
@@ -190,7 +191,7 @@ func TestGConn_Read(t *testing.T) {
 }
 func TestGConn_Close(t *testing.T) {
 
-	gologging.SetLogger("TestGConn_Close")
+	loggerfac.Init("TestGConn_Close")
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
 	s := []byte{}
@@ -250,7 +251,7 @@ func TestGConn_Close(t *testing.T) {
 }
 
 func TestGConn_Close2(t *testing.T) {
-	gologging.SetLogger("TestGConn_Close2")
+	loggerfac.Init("TestGConn_Close2")
 	go func() {
 		l, err := Listen(&GAddr{
 			IP:   "192.168.6.6",
@@ -287,7 +288,7 @@ func TestGConn_Close2(t *testing.T) {
 	time.Sleep(1000 * time.Second)
 }
 func TestGListener_Accept(t *testing.T) {
-	gologging.SetLogger("TestGListener_Accept")
+	loggerfac.Init("TestGListener_Accept")
 	s1 := "s1"
 	s2 := "s2"
 	go func() {
@@ -345,7 +346,7 @@ func TestGListener_Accept(t *testing.T) {
 }
 
 func TestGListener_Close(t *testing.T) {
-	gologging.SetLogger("TestGListener_Close")
+	loggerfac.Init("TestGListener_Close")
 	hello1 := "hello1"
 	hello2 := "hello2"
 	// listen
@@ -398,7 +399,7 @@ func TestGListener_Close(t *testing.T) {
 	time.Sleep(1000 * time.Second)
 }
 func TestGConn_LocalAddr(t *testing.T) {
-	gologging.SetLogger("TestGConn_LocalAddr")
+	loggerfac.Init("TestGConn_LocalAddr")
 	// listen
 	go func() {
 		l, err := Listen(&GAddr{
@@ -425,7 +426,7 @@ func TestGConn_LocalAddr(t *testing.T) {
 
 func TestGConn_Read2(t *testing.T) {
 
-	gologging.SetLogger("TestGConn_Read2")
+	loggerfac.Init("TestGConn_Read2")
 	go http.ListenAndServe(":8888", nil)
 	devNull, _ := os.Open(os.DevNull)
 	log.SetOutput(devNull)
@@ -482,4 +483,48 @@ func TestGConn_Read2(t *testing.T) {
 	}
 
 	time.Sleep(1000 * time.Hour)
+}
+
+func TestGConn_RemoteAddr(t *testing.T) {
+	loggerfac.Init("TestGConn_RemoteAddr")
+	go func() {
+		time.Sleep(2*time.Second)
+		c,err:=net.DialUDP("udp",nil,&net.UDPAddr{
+			IP:   net.ParseIP("127.0.0.1"),
+			Port: 5555,
+			Zone: "",
+		})
+		if err!=nil{
+			panic(err)
+		}
+		_,err=c.Write([]byte("hello"))
+		if err!=nil{
+			panic(err)
+		}
+		c.Close()
+	}()
+	c,err:=net.ListenUDP("udp",&net.UDPAddr{
+		IP:   nil,
+		Port: 5555,
+		Zone: "",
+	})
+	if err!=nil{
+		panic(err)
+	}
+	go func() {
+		time.Sleep(5*time.Second)
+		_,err=c.Write([]byte("hello2"))
+		if err!=nil{
+			panic(err)
+		}
+		fmt.Println("res")
+	}()
+	for ; ;  {
+		bs:=make([]byte ,1024,1024)
+		n,udp,err:=c.ReadFromUDP(bs)
+		if err!=nil{
+			panic(err)
+		}
+		fmt.Println(n,udp.String())
+	}
 }
