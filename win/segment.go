@@ -14,7 +14,7 @@ const (
 	obMaxResendC          = 12
 )
 const (
-	obincrto = 1.5
+	obincrto = 3
 	incrto   = 2
 )
 

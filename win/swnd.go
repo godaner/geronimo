@@ -32,9 +32,8 @@ const (
 	defCongWinSize   = 1
 	defRecWinSize    = 32
 	maxCongWinSize   = defRecWinSize
-	obDefCongWinSize = 64
-	obDefRecWinSize  = 256
-	obMaxCongWinSize = obDefRecWinSize
+	obDefCongWinSize = 256
+	obDefRecWinSize  = obDefCongWinSize
 )
 
 const (
@@ -55,8 +54,8 @@ const (
 	max_rto    = time.Duration(500) * time.Millisecond
 	def_rto    = time.Duration(100) * time.Millisecond
 	ob_min_rto = time.Duration(1) * time.Nanosecond
-	ob_max_rto = time.Duration(800) * time.Millisecond
-	ob_def_rto = time.Duration(80) * time.Millisecond
+	ob_max_rto = time.Duration(500) * time.Millisecond
+	ob_def_rto = time.Duration(10) * time.Millisecond
 )
 const (
 	// flush
@@ -199,10 +198,10 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 	case EventEnd:
 		switch s.OverBose {
 		case true:
-			s.cwnd *= 2
-			if s.cwnd > obMaxCongWinSize {
-				s.cwnd = obMaxCongWinSize
-			}
+			//s.cwnd *= 2
+			//if s.cwnd > obMaxCongWinSize {
+			//	s.cwnd = obMaxCongWinSize
+			//}
 		case false:
 			if s.ssthresh <= s.cwnd {
 				s.cwnd += 1 // avoid cong
@@ -229,10 +228,10 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 	case EventResend:
 		switch s.OverBose {
 		case true:
-			s.cwnd--
-			if s.cwnd <= 0 {
-				s.cwnd = 1
-			}
+			//s.cwnd--
+			//if s.cwnd <= 0 {
+			//	s.cwnd = 1
+			//}
 		case false:
 			s.ssthresh = _maxi64(s.cwnd/2, minSsthresh)
 			s.cwnd = 1
