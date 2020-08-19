@@ -9,12 +9,12 @@ import (
 
 const (
 	quickResendIfAckGEN   = 3
-	obQuickResendIfAckGEN = 2
+	obQuickResendIfAckGEN = 3
 	maxResendC            = 10
 	obMaxResendC          = 12
 )
 const (
-	obincrto = 3
+	obincrto = 2
 	incrto   = 2
 )
 
