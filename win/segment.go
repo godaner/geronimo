@@ -11,11 +11,15 @@ const (
 	quickResendIfAckGEN   = 3
 	obQuickResendIfAckGEN = 3
 	maxResendC            = 10
-	obMaxResendC          = 12
+	obMaxResendC          = 8
 )
 const (
 	obincrto = 2
 	incrto   = 2
+)
+const (
+	firstSendC   = 1
+	obFirstSendC = 3
 )
 
 var (
@@ -127,7 +131,19 @@ func (s *segment) Send() (err error) {
 	s.Lock()
 	defer s.Unlock()
 	s.setResend()
-	return s.ss(s.seq, s.bs)
+	fs := firstSendC
+	switch s.overBose {
+	case true:
+		fs = obFirstSendC
+	}
+	// send n time
+	for i := 0; i < fs; i++ {
+		err = s.ss(s.seq, s.bs)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // AckIi

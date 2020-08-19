@@ -354,7 +354,7 @@ func TestGListener_Close(t *testing.T) {
 		l, err := Listen(&GAddr{
 			IP:   "192.168.6.6",
 			Port: 3333,
-		},SetOverBose(false),SetEnc("aes-256-cfb@123qwe"))
+		}, SetOverBose(false), SetEnc("aes-256-cfb@123qwe"))
 		if err != nil {
 			panic(err)
 		}
@@ -384,7 +384,7 @@ func TestGListener_Close(t *testing.T) {
 				c2, err := Dial(&GAddr{
 					IP:   "192.168.6.6",
 					Port: 3333,
-				},SetOverBose(false),SetEnc("aes-256-cfb@123qwe"))
+				}, SetOverBose(false), SetEnc("aes-256-cfb@123qwe"))
 				n, err := c2.Write([]byte(hello1))
 				fmt.Println("c w", n, err)
 				bs := make([]byte, len(hello2), len(hello2))
@@ -414,7 +414,7 @@ func TestGConn_LocalAddr(t *testing.T) {
 
 	}()
 	go func() {
-		time.Sleep(1*time.Second)
+		time.Sleep(1 * time.Second)
 		c2, err := Dial(&GAddr{
 			IP:   "192.168.6.6",
 			Port: 3333,
@@ -443,7 +443,7 @@ func TestGConn_Read2(t *testing.T) {
 		l, err := Listen(&GAddr{
 			IP:   "192.168.6.6",
 			Port: 2222,
-		},SetOverBose(false),SetEnc("aes-256-cfb@123qwe"))
+		}, SetOverBose(false), SetEnc("aes-256-cfb@123qwe"))
 		if err != nil {
 			panic(err)
 		}
@@ -471,7 +471,7 @@ func TestGConn_Read2(t *testing.T) {
 
 			IP:   "192.168.6.6",
 			Port: 2222,
-		},SetOverBose(false),SetEnc("aes-256-cfb@123qwe"))
+		}, SetOverBose(false), SetEnc("aes-256-cfb@123qwe"))
 		if err != nil {
 			panic(err)
 		}
@@ -488,43 +488,51 @@ func TestGConn_Read2(t *testing.T) {
 func TestGConn_RemoteAddr(t *testing.T) {
 	loggerfac.Init("TestGConn_RemoteAddr")
 	go func() {
-		time.Sleep(2*time.Second)
-		c,err:=net.DialUDP("udp",nil,&net.UDPAddr{
+		time.Sleep(2 * time.Second)
+		c, err := net.DialUDP("udp", nil, &net.UDPAddr{
 			IP:   net.ParseIP("127.0.0.1"),
 			Port: 5555,
 			Zone: "",
 		})
-		if err!=nil{
+		if err != nil {
 			panic(err)
 		}
-		_,err=c.Write([]byte("hello"))
-		if err!=nil{
+		_, err = c.Write([]byte("hello"))
+		if err != nil {
 			panic(err)
 		}
 		c.Close()
 	}()
-	c,err:=net.ListenUDP("udp",&net.UDPAddr{
+	c, err := net.ListenUDP("udp", &net.UDPAddr{
 		IP:   nil,
 		Port: 5555,
 		Zone: "",
 	})
-	if err!=nil{
+	if err != nil {
 		panic(err)
 	}
 	go func() {
-		time.Sleep(5*time.Second)
-		_,err=c.Write([]byte("hello2"))
-		if err!=nil{
+		time.Sleep(5 * time.Second)
+		_, err = c.Write([]byte("hello2"))
+		if err != nil {
 			panic(err)
 		}
 		fmt.Println("res")
 	}()
-	for ; ;  {
-		bs:=make([]byte ,1024,1024)
-		n,udp,err:=c.ReadFromUDP(bs)
-		if err!=nil{
+	for {
+		bs := make([]byte, 1024, 1024)
+		n, udp, err := c.ReadFromUDP(bs)
+		if err != nil {
 			panic(err)
 		}
-		fmt.Println(n,udp.String())
+		fmt.Println(n, udp.String())
+	}
+}
+func TestGConn_SetDeadline(t *testing.T) {
+	m := 8
+	n := 100
+	for i := 0; i < m; i++ {
+		fmt.Println(n)
+		n *= 2
 	}
 }
