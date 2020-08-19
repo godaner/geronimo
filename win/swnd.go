@@ -29,11 +29,15 @@ const (
 )
 
 const (
-	defCongWinSize   = 1
-	defRecWinSize    = 32
-	maxCongWinSize   = defRecWinSize
-	obDefCongWinSize = 256
-	obDefRecWinSize  = obDefCongWinSize
+	// normal
+	defCongWinSize = 1
+	defRecWinSize  = 32
+	maxCongWinSize = defRecWinSize
+	// ob
+	obDefCongWinSize = 32
+	obDefRecWinSize  = 32
+	//obMaxCongWinSize = 32
+	//obMinCongWinSize = 2
 )
 
 const (
@@ -54,8 +58,8 @@ const (
 	max_rto    = time.Duration(500) * time.Millisecond
 	def_rto    = time.Duration(100) * time.Millisecond
 	ob_min_rto = time.Duration(1) * time.Nanosecond
-	ob_max_rto = time.Duration(1000) * time.Millisecond
-	ob_def_rto = time.Duration(100) * time.Millisecond
+	ob_max_rto = time.Duration(60000) * time.Millisecond
+	ob_def_rto = time.Duration(30) * time.Millisecond
 )
 const (
 	// flush
@@ -214,7 +218,7 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		}
 		s.comRTO(float64(ec.rttm))
 		s.comSendWinSize()
-		s.logger.Info("SWND : segment ack rttm is", ec.rttm, ", rto is", s.rto)
+		s.logger.Info("SWND : segment ack rttm is", ec.rttm, ", crto is", s.rto)
 		return nil
 	case EventQResend:
 		switch s.OverBose {
@@ -229,9 +233,7 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		switch s.OverBose {
 		case true:
 			//s.cwnd--
-			//if s.cwnd <= 0 {
-			//	s.cwnd = 1
-			//}
+			//s.cwnd = _maxi64(s.cwnd, obMinCongWinSize)
 		case false:
 			s.ssthresh = _maxi64(s.cwnd/2, minSsthresh)
 			s.cwnd = 1
@@ -351,7 +353,7 @@ func (s *SWND) send(sr segmentReader) (err error) {
 		// inc seq
 		s.tSeq++
 		// send
-		s.logger.Info("SWND : segment send , seq is [", seg.Seq(), "] , segment len is", len(seg.Bs()), ", appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd, ", rto is", int64(s.rto))
+		s.logger.Info("SWND : segment send , seq is [", seg.Seq(), "] , segment len is", len(seg.Bs()), ", appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd, ", crto is", int64(s.rto))
 		err := seg.Send()
 		if err != nil {
 			return err
@@ -376,7 +378,7 @@ func (s *SWND) loopFlush() {
 				return
 			case <-s.flushTimer.C:
 				s.Lock()
-				s.logger.Debug("SWND : flushing , appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", recv win size is", s.rwnd, ", cong win size is", s.cwnd, ", rto is", int64(s.rto))
+				s.logger.Debug("SWND : flushing , appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", recv win size is", s.rwnd, ", cong win size is", s.cwnd, ", crto is", int64(s.rto))
 				err := s.send(s.readAny)
 				if err != nil {
 					s.logger.Debug("SWND : flushing err , err is", err)
@@ -411,11 +413,11 @@ func (s *SWND) comRTO(rttm float64) {
 	switch s.OverBose {
 	case true:
 		s.rto = ob_def_rto
-		//if s.rto < ob_min_rto {
-		//	s.rto = ob_min_rto
+		//if s.crto < ob_min_rto {
+		//	s.crto = ob_min_rto
 		//}
-		//if s.rto > ob_max_rto {
-		//	s.rto = ob_max_rto
+		//if s.crto > ob_max_rto {
+		//	s.crto = ob_max_rto
 		//}
 	case false:
 		s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
@@ -489,7 +491,7 @@ func (s *SWND) loopPrint() {
 			case <-s.closeSignal:
 				return
 			case <-time.After(5 * time.Second):
-				s.logger.Info("SWND : loop print , appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", recv win size is", s.rwnd, ", cong win size is", s.cwnd, ", rto is", int64(s.rto))
+				s.logger.Info("SWND : loop print , appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", recv win size is", s.rwnd, ", cong win size is", s.cwnd, ", crto is", int64(s.rto))
 			}
 		}
 	}()

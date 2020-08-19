@@ -529,8 +529,8 @@ func TestGConn_RemoteAddr(t *testing.T) {
 	}
 }
 func TestGConn_SetDeadline(t *testing.T) {
-	m := 8
-	n := 100
+	m := 10
+	n := 50
 	for i := 0; i < m; i++ {
 		fmt.Println(n)
 		n *= 2
