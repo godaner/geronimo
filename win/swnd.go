@@ -34,8 +34,8 @@ const (
 	defRecWinSize  = 32
 	maxCongWinSize = defRecWinSize
 	// ob
-	obDefCongWinSize = 32
-	obDefRecWinSize  = 32
+	obDefCongWinSize = 64
+	obDefRecWinSize  = 64
 	//obMaxCongWinSize = 32
 	//obMinCongWinSize = 2
 )
@@ -52,14 +52,18 @@ const (
 	appBufferSize = appBufferMSS * mss // n mss
 )
 const (
-	rtts_a     = float64(0.125)
-	rttd_b     = float64(0.25)
-	min_rto    = time.Duration(1) * time.Nanosecond
-	max_rto    = time.Duration(500) * time.Millisecond
-	def_rto    = time.Duration(100) * time.Millisecond
-	ob_min_rto = time.Duration(1) * time.Nanosecond
-	ob_max_rto = time.Duration(60000) * time.Millisecond
-	ob_def_rto = time.Duration(30) * time.Millisecond
+	rtts_a      = float64(0.125)
+	rttd_b      = float64(0.25)
+	// normal
+	min_rto     = time.Duration(1) * time.Nanosecond
+	max_rto     = time.Duration(500) * time.Millisecond
+	mmax_rto    = time.Duration(5000) * time.Millisecond
+	def_rto     = time.Duration(100) * time.Millisecond
+	// ob
+	ob_min_rto  = time.Duration(1) * time.Nanosecond
+	ob_max_rto  = time.Duration(2500) * time.Millisecond
+	ob_mmax_rto = time.Duration(30000) * time.Millisecond
+	ob_def_rto  = time.Duration(30) * time.Millisecond
 )
 const (
 	// flush

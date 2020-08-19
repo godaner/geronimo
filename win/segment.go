@@ -11,7 +11,7 @@ const (
 	quickResendIfAckGEN   = 3
 	obQuickResendIfAckGEN = 3
 	maxResendC            = 10
-	obMaxResendC          = 15
+	obMaxResendC          = 30
 )
 const (
 	obincrto = 0.5
@@ -56,7 +56,7 @@ type segment struct {
 	qrsr             chan struct{} // for quick resend result
 	acks             chan struct{} // for ack segment
 	acksr            chan struct{} // for ack segment result
-	t                *time.Timer
+	rst, rstt        *time.Timer   // resend timer ; resend timeout timer
 	logger           logger.Logger
 	es               eventSender
 	ss               SegmentSender // ss
@@ -78,7 +78,8 @@ func newSSegment(logger logger.Logger, overBose bool, seq uint16, bs []byte, rto
 		acks:       make(chan struct{}),
 		acksr:      make(chan struct{}),
 		acked:      make(chan struct{}),
-		t:          nil,
+		rst:        nil,
+		rstt:       nil,
 		logger:     logger,
 		es: func(e event, ec *eContext) (err error) {
 			if es != nil {
@@ -203,8 +204,14 @@ func (s *segment) triggerQResend() {
 
 // setResend
 func (s *segment) setResend() {
-	s.t = time.NewTimer(s.crto)
 	rttms := time.Now()
+	mmrto := mmax_rto
+	switch s.overBose {
+	case true:
+		mmrto = ob_mmax_rto
+	}
+	s.rstt = time.NewTimer(mmrto)
+	s.rst = time.NewTimer(s.crto)
 	go func() {
 		endBy := EndByUnknown
 		defer func() {
@@ -212,9 +219,10 @@ func (s *segment) setResend() {
 		}()
 		for {
 			select {
-			//case <-s.acked:
-			//	return
-			case <-s.t.C:
+			case <-s.rstt.C:
+				endBy = EndByResendTo
+				return
+			case <-s.rst.C:
 				err := s.tickerResend()
 				if err != nil {
 					if err == errResendTo {
@@ -253,7 +261,7 @@ func (s *segment) resend() (err error) {
 	}
 	s.rsc++
 	s.incRTO()
-	s.t.Reset(s.crto)
+	s.rst.Reset(s.crto)
 	err = s.ss(s.seq, s.bs)
 	if err != nil {
 		return err
@@ -321,7 +329,8 @@ func (s *segment) quickResend() (err error) {
 
 // endResend
 func (s *segment) endResend(rttms time.Time, endBy endBy) {
-	s.t.Stop()
+	s.rst.Stop()
+	s.rstt.Stop()
 	close(s.acked)
 	s.es(EventEnd, &eContext{
 		rttm: time.Now().Sub(rttms),
