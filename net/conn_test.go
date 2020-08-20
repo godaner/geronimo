@@ -256,7 +256,7 @@ func TestGConn_Close2(t *testing.T) {
 		l, err := Listen(&GAddr{
 			IP:   "192.168.6.6",
 			Port: 3333,
-		})
+		},SetOverBose(true),SetEnc("aes-256-cfb@123qwe"))
 		if err != nil {
 			panic(err)
 		}
@@ -272,7 +272,7 @@ func TestGConn_Close2(t *testing.T) {
 	c1, err := Dial(&GAddr{
 		IP:   "192.168.6.6",
 		Port: 3333,
-	})
+	},SetOverBose(true),SetEnc("aes-256-cfb@123qwe"))
 	if err != nil {
 		panic(err)
 	}

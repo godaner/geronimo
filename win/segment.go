@@ -9,14 +9,14 @@ import (
 
 const (
 	quickResendIfAckGEN   = 3
-	obQuickResendIfAckGEN = 3
+	obQuickResendInterval = time.Duration(20) * time.Millisecond
 	maxResendC            = 10
-	obMaxResendC          = 5
+	obMaxResendC          = 15
 )
 const (
 	obincrto = 0.5
 	//obincrto = 2
-	incrto = 2
+	incrto   = 2
 )
 
 var (
@@ -51,7 +51,8 @@ type segment struct {
 	overBose         bool
 	bs               []byte        // payload
 	seq              uint16        // seq
-	rsc              uint32        // resend count
+	trsc             uint32        // ticker resend count
+	obqrt            *time.Timer   // ob quick resend timer
 	ackc             uint8         // ack count , for quick resend
 	qrs              chan struct{} // for quick resend
 	qrsr             chan struct{} // for quick resend result
@@ -72,13 +73,14 @@ func newSSegment(logger logger.Logger, overBose bool, seq uint16, bs []byte, rto
 		obfixedrto: rto,
 		bs:         bs,
 		seq:        seq,
-		rsc:        0,
+		trsc:       0,
 		ackc:       0,
 		qrs:        make(chan struct{}),
 		qrsr:       make(chan struct{}),
 		acks:       make(chan struct{}),
 		acksr:      make(chan struct{}),
 		acked:      make(chan struct{}),
+		obqrt:      time.NewTimer(obQuickResendInterval),
 		rst:        nil,
 		rstt:       nil,
 		logger:     logger,
@@ -167,13 +169,14 @@ func (s *segment) TryQResend() (err error) {
 	}
 	switch s.overBose {
 	case true:
-		if s.ackc >= obQuickResendIfAckGEN {
-			s.ackc = 0
+		select {
+		case <-s.obqrt.C:
 			s.triggerQResend()
-		} else {
-			s.ackc++
+			s.obqrt.Reset(obQuickResendInterval)
+			return nil
+		default:
+			return nil
 		}
-
 	case false:
 		if s.ackc >= quickResendIfAckGEN {
 			s.ackc = 0
@@ -277,15 +280,15 @@ func (s *segment) tickerResend() (err error) {
 	s.logger.Info("segment#tickerResend : ticker resend , seq is [", s.seq, "] , crto is", s.crto)
 	switch s.overBose {
 	case true:
-		if obMaxResendC < s.rsc {
+		if obMaxResendC < s.trsc {
 			return errResendTo
 		}
 	case false:
-		if maxResendC < s.rsc {
+		if maxResendC < s.trsc {
 			return errResendTo
 		}
 	}
-	s.rsc++
+	s.trsc++
 	s.incRTO()
 	s.rst.Reset(s.crto)
 	err = s.ss(s.seq, s.bs)
@@ -323,6 +326,7 @@ func (s *segment) quickResend() (err error) {
 func (s *segment) endResend(rttms time.Time, endBy endBy) {
 	s.rst.Stop()
 	s.rstt.Stop()
+	s.obqrt.Stop()
 	close(s.acked)
 	s.es(EventEnd, &eContext{
 		rttm: time.Now().Sub(rttms),

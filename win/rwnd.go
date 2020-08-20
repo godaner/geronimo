@@ -161,12 +161,10 @@ func (r *RWND) ack(seqN uint16, ackN *uint16) {
 		ackN = &a
 	}
 	r.logger.Info("RWND : send ack , seq is", seqN, ", ack is [", *ackN, "]")
-	go func() {
-		err := r.AckSender(seqN, *ackN, 0)
-		if err != nil {
-			r.logger.Error("RWND : ack callback err , err is", err.Error())
-		}
-	}()
+	err := r.AckSender(seqN, *ackN, 0)
+	if err != nil {
+		r.logger.Error("RWND : ack callback err , err is", err.Error())
+	}
 }
 
 // legalSeqN
