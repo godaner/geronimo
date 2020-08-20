@@ -9,13 +9,13 @@ import (
 
 const (
 	quickResendIfAckGEN   = 3
-	obQuickResendInterval = time.Duration(20) * time.Millisecond
+	obQuickResendInterval = time.Duration(40) * time.Millisecond
 	maxResendC            = 10
-	obMaxResendC          = 15
+	obMaxResendC          = 10
 )
 const (
-	obincrto = 0.5
-	//obincrto = 2
+	//obincrto = 0.5
+	obincrto = 2
 	incrto   = 2
 )
 
@@ -80,7 +80,7 @@ func newSSegment(logger logger.Logger, overBose bool, seq uint16, bs []byte, rto
 		acks:       make(chan struct{}),
 		acksr:      make(chan struct{}),
 		acked:      make(chan struct{}),
-		obqrt:      time.NewTimer(obQuickResendInterval),
+		obqrt:      time.NewTimer(time.Duration(1) * time.Nanosecond),
 		rst:        nil,
 		rstt:       nil,
 		logger:     logger,
@@ -256,8 +256,8 @@ func (s *segment) setResend() {
 func (s *segment) incRTO() {
 	switch s.overBose {
 	case true:
-		s.crto = s.crto + time.Duration(obincrto*float64(s.obfixedrto))
-		//s.crto = time.Duration(obincrto * float64(s.crto))
+		//s.crto = s.crto + time.Duration(obincrto*float64(s.obfixedrto))
+		s.crto = time.Duration(obincrto * float64(s.crto))
 		if s.crto < ob_min_rto {
 			s.crto = ob_min_rto
 		}
