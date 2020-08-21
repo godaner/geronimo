@@ -9,14 +9,14 @@ import (
 
 const (
 	quickResendIfAckGEN   = 3
-	obQuickResendInterval = time.Duration(40) * time.Millisecond
+	obQuickResendInterval = time.Duration(10) * time.Millisecond
 	maxResendC            = 10
 	obMaxResendC          = 10
 )
 const (
-	//obincrto = 0.5
-	obincrto = 2
-	incrto   = 2
+	obincrto = time.Duration(15) * time.Millisecond
+	//obincrto = 2
+	incrto = 2
 )
 
 var (
@@ -257,7 +257,8 @@ func (s *segment) incRTO() {
 	switch s.overBose {
 	case true:
 		//s.crto = s.crto + time.Duration(obincrto*float64(s.obfixedrto))
-		s.crto = time.Duration(obincrto * float64(s.crto))
+		s.crto = s.crto + obincrto
+		//s.crto = time.Duration(obincrto * float64(s.crto))
 		if s.crto < ob_min_rto {
 			s.crto = ob_min_rto
 		}

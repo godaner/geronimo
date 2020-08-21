@@ -36,7 +36,7 @@ const (
 	defRecWinSize  = 32
 	maxCongWinSize = defRecWinSize
 	// ob
-	obDefCongWinSize = 32
+	obDefCongWinSize = 16
 	obDefRecWinSize  = 256
 	obMaxCongWinSize = 256
 	obMinCongWinSize = 2
@@ -65,7 +65,7 @@ const (
 	ob_min_rto  = time.Duration(1) * time.Nanosecond
 	ob_max_rto  = time.Duration(1000) * time.Millisecond
 	ob_mmax_rto = time.Duration(10) * time.Second
-	ob_def_rto  = time.Duration(50) * time.Millisecond
+	ob_def_rto  = time.Duration(300) * time.Millisecond
 )
 const (
 	// flush
@@ -424,19 +424,20 @@ func (s *SWND) Close() (err error) {
 
 // comRTO
 func (s *SWND) comRTO(rttm float64) {
+	s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
+	s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttm-float64(s.rtts)))
+	s.rto = s.rtts + 4*s.rttd
 	switch s.OverBose {
 	case true:
-		s.rto = ob_def_rto
-		//if s.crto < ob_min_rto {
-		//	s.crto = ob_min_rto
-		//}
-		//if s.crto > ob_max_rto {
-		//	s.crto = ob_max_rto
-		//}
+		//s.rto = ob_def_rto
+		if s.rto < ob_min_rto {
+			s.rto = ob_min_rto
+		}
+		if s.rto > ob_max_rto {
+			s.rto = ob_max_rto
+		}
 	case false:
-		s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
-		s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttm-float64(s.rtts)))
-		s.rto = s.rtts + 4*s.rttd
+
 		if s.rto < min_rto {
 			s.rto = min_rto
 		}
@@ -527,11 +528,11 @@ func (s *SWND) getTryResendSeqs(seq, ack uint16) (seqs []uint16) {
 			index++
 		}
 		if seqIndex == -1 {
-			return // illegal ack
+			return nil // illegal ack
 		}
 		if seqIndex < obQuickResendIfSkipGEN {
 			// 0 1 2
-			return // no segment need quick resend
+			return nil // no segment need quick resend
 		}
 		//s.logger.Criticalf("getTryResendSeqs : seq is : %v seqIndex is : %v , seqs is %v , end seqs is : %v ", seq, seqIndex, seqs, seqs[:seqIndex-obQuickResendIfSkipGEN+1])
 		return seqs[:seqIndex-obQuickResendIfSkipGEN+1]
