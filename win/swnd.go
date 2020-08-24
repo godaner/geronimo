@@ -32,9 +32,12 @@ const (
 )
 const (
 	defCongWinSize = 16
-	defRecWinSize  = 256
-	maxCongWinSize = 256
+	defRecWinSize  = 128
+	maxCongWinSize = 128
 	minCongWinSize = 2
+)
+const (
+	minRRTSamplingInterval = 10
 )
 
 //const (
@@ -49,8 +52,8 @@ const (
 	appBufferSize = appBufferMSS * mss // n mss
 )
 const (
-	rtts_a  = float64(0.125)
-	rttd_b  = float64(0.25)
+	//rtts_a  = float64(0.125)
+	//rttd_b  = float64(0.25)
 	min_rto = time.Duration(1) * time.Nanosecond
 	max_rto = time.Duration(500) * time.Millisecond
 	def_rto = time.Duration(100) * time.Millisecond
@@ -121,12 +124,29 @@ type SWND struct {
 	rwnd       int64               // receive window size
 	hSeq       uint16              // current head seq , location is head
 	tSeq       uint16              // current tail seq , location is tail
+	minrtt     *minrtt
 	//ssthresh                int64               // ssthresh
 	rttd, rtts, rto         time.Duration
 	sendFinish, closeSignal chan struct{}
 	logger                  logger.Logger
 	SegmentSender           SegmentSender
 	FTag                    string
+}
+
+// minrtt
+type minrtt struct {
+	n   uint8
+	rtt time.Duration
+}
+
+func (m *minrtt) com(newrtt time.Duration) {
+	if m.n > minRRTSamplingInterval {
+		m.n = 0
+		m.rtt = newrtt
+		return
+	}
+	m.rtt = time.Duration(_mini64(int64(m.rtt), int64(newrtt)))
+	m.n++
 }
 
 // Write
@@ -217,7 +237,7 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		s.cwnd = _mini64(s.cwnd, maxCongWinSize)
 		s.comRTO(float64(ec.rttm))
 		s.comSendWinSize()
-		s.logger.Critical("SWND : segment ack rttm is", ec.rttm, ", rto is", s.rto)
+		s.logger.Info("SWND : segment ack rttm is", ec.rttm, ", rto is", s.rto)
 		return nil
 	case EventQResend:
 		return nil
@@ -258,6 +278,10 @@ func (s *SWND) init() {
 		s.rwnd = defRecWinSize
 		s.cwnd = defCongWinSize
 		s.swnd = s.cwnd
+		s.minrtt = &minrtt{
+			n:   0,
+			rtt: def_rto,
+		}
 		s.loopFlush()
 		s.loopPrint()
 	})
@@ -387,9 +411,11 @@ func (s *SWND) Close() (err error) {
 
 // comRTO
 func (s *SWND) comRTO(rttm float64) {
-	s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
-	s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttm-float64(s.rtts)))
-	s.rto = s.rtts + 4*s.rttd
+	s.minrtt.com(time.Duration(rttm))
+	s.rto = s.minrtt.rtt
+	//s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
+	//s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttm-float64(s.rtts)))
+	//s.rto = s.rtts + 4*s.rttd
 	if s.rto < min_rto {
 		s.rto = min_rto
 	}
