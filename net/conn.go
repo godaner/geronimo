@@ -21,10 +21,8 @@ const (
 	udpmss = 1472
 )
 const (
-	keepalive     = time.Duration(10) * time.Second
-	keepaliveTo   = 3 * keepalive
-	obKeepalive   = time.Duration(5) * time.Second
-	obKeepaliveTo = 5 * obKeepalive
+	keepalive   = time.Duration(3) * time.Second
+	keepaliveTo = 4 * keepalive
 )
 const (
 	syn1ResendTime    = time.Duration(100) * time.Millisecond
@@ -64,15 +62,14 @@ const (
 )
 
 var (
-	ErrNotEstablished = errors.New("not established")
-	ErrNotReachable   = errors.New("host not reachable")
-	ErrDialTimeout    = errors.New("dial timeout")
-	ErrFINTimeout     = errors.New("fin timeout")
+	errNotEstablished = errors.New("not established")
+	errNotReachable   = errors.New("host not reachable")
+	errDialTimeout    = errors.New("dial timeout")
+	errFINTimeout     = errors.New("fin timeout")
 )
 
 type GConn struct {
 	*net.UDPConn
-	OverBose                                                                                     bool
 	initOnce, toAcceptOnce, keepaliveOnce, initSendWinOnce, initRecvWinOnce, initLoopReadUDPOnce sync.Once
 	f                                                                                            uint8
 	recvWin                                                                                      *win.RWND
@@ -99,7 +96,7 @@ func (g *GConn) String() string {
 func (g *GConn) Read(b []byte) (n int, err error) {
 	g.init()
 	if g.Status() != StatusCliEstablished && g.Status() != StatusSerEstablished {
-		return 0, ErrNotEstablished
+		return 0, errNotEstablished
 	}
 	return g.recvWin.Read(b, g.rdl)
 }
@@ -107,7 +104,7 @@ func (g *GConn) Read(b []byte) (n int, err error) {
 func (g *GConn) Write(b []byte) (n int, err error) {
 	g.init()
 	if g.Status() != StatusCliEstablished && g.Status() != StatusSerEstablished {
-		return 0, ErrNotEstablished
+		return 0, errNotEstablished
 	}
 	return len(b), g.sendWin.Write(b, g.wdl)
 }
@@ -209,14 +206,14 @@ func (g *GConn) init() {
 						err = g.sendMessage(m1)
 						if err != nil {
 							g.logger.Error("GConn#dial : send SYN1 err , maybe server not listening now , err is", err)
-							return ErrNotReachable
+							return errNotReachable
 						}
 						// send udp success , mean dst can find , read it
 						g.loopReadUDP()
 						syn1ResendTime := syn1ResendTime
 						for {
 							if g.syn1ResendCount >= syn1ResendCount {
-								return ErrDialTimeout
+								return errDialTimeout
 							}
 							select {
 							case <-g.syn1Finish:
@@ -230,7 +227,7 @@ func (g *GConn) init() {
 								err = g.sendMessage(m1)
 								if err != nil {
 									g.logger.Error("GConn#dial : resend SYN1 err , maybe server shutdown now , err is", err)
-									return ErrNotReachable
+									return errNotReachable
 								}
 							}
 						}
@@ -323,12 +320,12 @@ func (g *GConn) init() {
 						err = g.sendMessage(m)
 						if err != nil {
 							g.logger.Error("GConn#close send FIN1 err , maybe server shutdown now , err is", err)
-							return ErrNotReachable
+							return errNotReachable
 						}
 						fin1ResendTIme := fin1ResendTIme
 						for {
 							if g.fin1ResendCount >= fin1ResendCount {
-								return ErrFINTimeout
+								return errFINTimeout
 							}
 							select {
 							case <-g.fin1Finish:
@@ -342,7 +339,7 @@ func (g *GConn) init() {
 								err = g.sendMessage(m)
 								if err != nil {
 									g.logger.Error("GConn#close : send FIN1 err , maybe server shutdown now , err , err is", err)
-									return ErrNotReachable
+									return errNotReachable
 								}
 							}
 						}
@@ -402,8 +399,7 @@ func (g *GConn) initWin() {
 func (g *GConn) initRecvWin() {
 	g.initRecvWinOnce.Do(func() {
 		g.recvWin = &win.RWND{
-			OverBose: g.OverBose,
-			FTag:     g.String(),
+			FTag: g.String(),
 			AckSender: func(seq, ack, receiveWinSize uint16) (err error) {
 				m := g.MsgFac.New()
 				m.ACK(seq, ack, receiveWinSize)
@@ -417,8 +413,7 @@ func (g *GConn) initRecvWin() {
 func (g *GConn) initSendWin() {
 	g.initSendWinOnce.Do(func() {
 		g.sendWin = &win.SWND{
-			OverBose: g.OverBose,
-			FTag:     g.String(),
+			FTag: g.String(),
 			SegmentSender: func(seq uint16, bs []byte) (err error) {
 				// send udp
 				m := g.MsgFac.New()
@@ -562,20 +557,13 @@ func (g *GConn) close() (err error) {
 
 // keepalive
 func (g *GConn) keepalive() {
-	ka := keepalive
-	kt := keepaliveTo
-	switch g.OverBose {
-	case true:
-		ka = obKeepalive
-		kt = obKeepaliveTo
-	}
 	g.keepaliveOnce.Do(func() {
-		g.keepaliveTimer = time.NewTimer(kt)
+		g.keepaliveTimer = time.NewTimer(keepaliveTo)
 		// send keepalive
 		go func() {
 			for {
 				select {
-				case <-time.After(ka):
+				case <-time.After(keepalive):
 					err := g.sendMessage(g.MsgFac.New().KeepAlive())
 					if err != nil {
 						g.logger.Error("GConn#keepalive : send keepalive err", err)
@@ -596,7 +584,7 @@ func (g *GConn) keepalive() {
 					g.Close()
 					return
 				case <-g.keepaliveC:
-					g.keepaliveTimer.Reset(kt)
+					g.keepaliveTimer.Reset(keepaliveTo)
 					continue
 				}
 			}
@@ -617,6 +605,7 @@ func (g *GConn) wait2msl() {
 // toAccept
 func (g *GConn) toAccept() {
 	g.toAcceptOnce.Do(func() {
-		g.lis.acceptResult <- &acceptRes{c: g, err: nil}
+		fmt.Println("ccccccccccccccccccc"+g.RemoteAddr().String())
+		g.lis.RecvNewConn(&acceptRes{c: g, err: nil})
 	})
 }

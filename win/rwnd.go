@@ -33,7 +33,6 @@ type AckSender func(seqN, ack, receiveWinSize uint16) (err error)
 type RWND struct {
 	sync.Mutex
 	sync.Once
-	OverBose    bool
 	rwnd        int64
 	readLock    sync.RWMutex
 	appBuffer   *bq                 // to app
@@ -87,7 +86,7 @@ func (r *RWND) Recv(seqN uint16, bs []byte) (err error) {
 	default:
 	}
 	// illegal seq ?
-	r.logger.Info("RWND : recv seq is [", seqN, "] , segment len is", len(bs))
+	r.logger.Info("RWND : recv seq is [", seqN, "] , segment len is", len(bs),", tailSeq is",r.tailSeq)
 	if !r.legalSeqN(seqN) {
 		return
 	}
@@ -108,12 +107,7 @@ func (r *RWND) init() {
 		r.appBuffer = &bq{Size: appBufferSize}
 		r.recved = make(map[uint16]*segment)
 		r.closeSignal = make(chan struct{})
-		switch r.OverBose {
-		case true:
-			r.rwnd = obDefRecWinSize
-		case false:
-			r.rwnd = defRecWinSize
-		}
+		r.rwnd = defRecWinSize
 		r.loopPrint()
 	})
 }
@@ -178,8 +172,8 @@ func (r *RWND) legalSeqN(seqN uint16) (yes bool) {
 	}
 	// illegal
 	ackN := seqN + 1
-	r.ack(seqN, &ackN)
 	r.logger.Warning("RWND : illegal seqN , recv seq is [", seqN, "]", ", ack is", ackN)
+	r.ack(seqN, &ackN)
 	return false
 }
 
