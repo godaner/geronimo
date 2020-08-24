@@ -31,9 +31,9 @@ const (
 	quickResendIfSkipGEN = 2
 )
 const (
-	defCongWinSize = 16
-	defRecWinSize  = 128
-	maxCongWinSize = 128
+	defCongWinSize = 32
+	defRecWinSize  = 256
+	maxCongWinSize = 256
 	minCongWinSize = 2
 )
 const (
@@ -54,9 +54,10 @@ const (
 const (
 	//rtts_a  = float64(0.125)
 	//rttd_b  = float64(0.25)
-	min_rto = time.Duration(1) * time.Nanosecond
-	max_rto = time.Duration(500) * time.Millisecond
-	def_rto = time.Duration(100) * time.Millisecond
+	minrtt2rto = time.Duration(15) * time.Millisecond
+	min_rto    = time.Duration(1) * time.Nanosecond
+	max_rto    = time.Duration(200) * time.Millisecond
+	def_rto    = time.Duration(100) * time.Millisecond
 )
 const (
 	// flush
@@ -412,7 +413,8 @@ func (s *SWND) Close() (err error) {
 // comRTO
 func (s *SWND) comRTO(rttm float64) {
 	s.minrtt.com(time.Duration(rttm))
-	s.rto = s.minrtt.rtt
+	//s.rto = s.minrtt.rtt
+	s.rto = s.minrtt.rtt + minrtt2rto
 	//s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
 	//s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttm-float64(s.rtts)))
 	//s.rto = s.rtts + 4*s.rttd
