@@ -3,17 +3,24 @@ package net
 import (
 	"errors"
 	"fmt"
-	"github.com/godaner/geronimo/logger"
-	gologging "github.com/godaner/geronimo/logger/go-logging"
 	"github.com/godaner/geronimo/rule"
 	msg "github.com/godaner/geronimo/rule"
 	"github.com/godaner/geronimo/rule/fac"
+	"github.com/godaner/logger"
+	loggerfac "github.com/godaner/logger/factory"
 	"net"
 	"sync"
+	"time"
 )
 
 const (
 	msgQSize = 100
+)
+const (
+	recvNewConnTo = 1 * time.Second
+)
+var (
+	errRecvNewConnTimeout     = errors.New("recv new conn timeout")
 )
 
 func Listen(addr *GAddr, options ...Option) (l net.Listener, err error) {
@@ -30,9 +37,8 @@ func Listen(addr *GAddr, options ...Option) (l net.Listener, err error) {
 		MsgFac: &fac.Fac{
 			Enc: opts.Enc,
 		},
-		OverBose: opts.OverBose,
-		laddr:    addr,
-		c:        c,
+		laddr: addr,
+		c:     c,
 	}, nil
 }
 
@@ -49,7 +55,6 @@ type GListener struct {
 	closeSignal  chan bool
 	logger       logger.Logger
 	MsgFac       *fac.Fac
-	OverBose     bool
 }
 type acceptRes struct {
 	c   net.Conn
@@ -58,7 +63,7 @@ type acceptRes struct {
 
 func (g *GListener) init() {
 	g.Do(func() {
-		g.logger = gologging.GetLogger(fmt.Sprintf("%v%v", "GListener", &g))
+		g.logger = loggerfac.GetLogger(fmt.Sprintf("%v%v", "GListener", &g))
 		g.acceptResult = make(chan *acceptRes)
 		g.closeSignal = make(chan bool)
 		g.gcs = &sync.Map{} //map[string]*GConn{}
@@ -89,13 +94,12 @@ func (g *GListener) init() {
 					if gc == nil && m1.Flag()&rule.FlagSYN1 == rule.FlagSYN1 {
 						// first connect
 						gc = &GConn{
-							UDPConn:  g.c,
-							OverBose: g.OverBose,
-							MsgFac:   g.MsgFac,
-							raddr:    fromUDPAddr(rAddr),
-							laddr:    fromUDPAddr(g.c.LocalAddr().(*net.UDPAddr)),
-							f:        FListen,
-							lis:      g,
+							UDPConn: g.c,
+							MsgFac:  g.MsgFac,
+							raddr:   fromUDPAddr(rAddr),
+							laddr:   fromUDPAddr(g.c.LocalAddr().(*net.UDPAddr)),
+							f:       FListen,
+							lis:     g,
 						}
 						g.gcs.Store(rAddr.String(), gc)
 						msg := make(chan msg.Message, msgQSize)
@@ -172,6 +176,15 @@ func (g *GListener) Accept() (c net.Conn, err error) {
 		return nil, errors.New("nil accept")
 	}
 	return r.c, r.err
+}
+func (g *GListener) RecvNewConn(r *acceptRes) {
+	g.init()
+	select {
+	case g.acceptResult <- r:
+		return
+	case <-time.After(recvNewConnTo):
+		panic(errRecvNewConnTimeout)
+	}
 }
 
 func (g *GListener) Close() error {

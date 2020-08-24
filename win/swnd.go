@@ -3,8 +3,8 @@ package win
 import (
 	"errors"
 	"fmt"
-	"github.com/godaner/geronimo/logger"
-	gologging "github.com/godaner/geronimo/logger/go-logging"
+	"github.com/godaner/logger"
+	loggerfac "github.com/godaner/logger/factory"
 	"math"
 	"sync"
 	"time"
@@ -27,20 +27,23 @@ const (
 	maxSeqN = uint16(1<<16 - 1) // [0,65535]
 	minSeqN = 0
 )
-
 const (
-	defCongWinSize   = 1
-	defRecWinSize    = 32
-	maxCongWinSize   = defRecWinSize
-	obDefCongWinSize = 32
-	obDefRecWinSize  = 256
-	obMaxCongWinSize = obDefRecWinSize
+	quickResendIfSkipGEN = 2
+)
+const (
+	defCongWinSize = 16
+	defRecWinSize  = 128
+	maxCongWinSize = 128
+	minCongWinSize = 2
+)
+const (
+	minRRTSamplingInterval = 10
 )
 
-const (
-	defSsthresh = 8
-	minSsthresh = 2
-)
+//const (
+//defSsthresh = 8
+//minSsthresh = 2
+//)
 const (
 	mss = 1472 - 14 - 16 // - protocol len , - vi len
 )
@@ -49,22 +52,17 @@ const (
 	appBufferSize = appBufferMSS * mss // n mss
 )
 const (
-	rtts_a     = float64(0.125)
-	rttd_b     = float64(0.25)
-	min_rto    = time.Duration(1) * time.Nanosecond
-	max_rto    = time.Duration(500) * time.Millisecond
-	def_rto    = time.Duration(100) * time.Millisecond
-	ob_min_rto = time.Duration(1) * time.Nanosecond
-	ob_max_rto = time.Duration(2000) * time.Millisecond
-	ob_def_rto = time.Duration(50) * time.Millisecond
+	//rtts_a  = float64(0.125)
+	//rttd_b  = float64(0.25)
+	min_rto = time.Duration(1) * time.Nanosecond
+	max_rto = time.Duration(500) * time.Millisecond
+	def_rto = time.Duration(100) * time.Millisecond
 )
 const (
-	// close timeout
-	closeTimeout = time.Duration(500) * time.Millisecond
 	// flush
 	closeCheckFlushTO = time.Duration(100) * time.Millisecond
 	// ack
-	closeCheckAckTO = time.Duration(200) * time.Millisecond
+	closeCheckAckTO = time.Duration(2) * time.Second
 )
 const (
 	clearReadySendInterval = time.Duration(10) * time.Millisecond
@@ -85,21 +83,21 @@ func init() {
 	if defCongWinSize > defRecWinSize {
 		panic("defCongWinSize > defRecWinSize")
 	}
-	if obDefCongWinSize > obDefRecWinSize {
-		panic("obDefCongWinSize > obDefRecWinSize")
+	if defCongWinSize > defRecWinSize {
+		panic("defCongWinSize > defRecWinSize")
 	}
 	if max_rto <= min_rto {
 		panic("max_rto <= min_rto")
 	}
-	if ob_max_rto <= ob_min_rto {
-		panic("ob_max_rto <= ob_min_rto")
+	if max_rto <= min_rto {
+		panic("max_rto <= min_rto")
 	}
-	if defCongWinSize != 1 {
-		panic("defCongWinSize !=1")
+	if defCongWinSize <= 0 {
+		panic("defCongWinSize <= 0")
 	}
-	if minSsthresh > defSsthresh {
-		panic("minSsthresh > defSsthresh")
-	}
+	//if minSsthresh > defSsthresh {
+	//	panic("minSsthresh > defSsthresh")
+	//}
 }
 func _maxi64(a, b int64) (c int64) {
 	if a > b {
@@ -107,26 +105,48 @@ func _maxi64(a, b int64) (c int64) {
 	}
 	return b
 }
+func _mini64(a, b int64) (c int64) {
+	if a > b {
+		return b
+	}
+	return a
+}
 
 type SWND struct {
 	sync.Once
 	sync.RWMutex
-	writeLock               sync.RWMutex
-	appBuffer               *bq                 // from app , wait for send
-	sent                    map[uint16]*segment // sent segments
-	flushTimer              *time.Timer         // loopFlush not send data
-	swnd                    int64               // send window size , swnd = min(cwnd,rwnd)
-	cwnd                    int64               // congestion window size
-	rwnd                    int64               // receive window size
-	hSeq                    uint16              // current head seq , location is head
-	tSeq                    uint16              // current tail seq , location is tail
-	ssthresh                int64               // ssthresh
+	writeLock  sync.RWMutex
+	appBuffer  *bq                 // from app , wait for send
+	sent       map[uint16]*segment // sent segments
+	flushTimer *time.Timer         // loopFlush not send data
+	swnd       int64               // send window size , swnd = min(cwnd,rwnd)
+	cwnd       int64               // congestion window size
+	rwnd       int64               // receive window size
+	hSeq       uint16              // current head seq , location is head
+	tSeq       uint16              // current tail seq , location is tail
+	minrtt     *minrtt
+	//ssthresh                int64               // ssthresh
 	rttd, rtts, rto         time.Duration
 	sendFinish, closeSignal chan struct{}
 	logger                  logger.Logger
-	OverBose                bool
 	SegmentSender           SegmentSender
 	FTag                    string
+}
+
+// minrtt
+type minrtt struct {
+	n   uint8
+	rtt time.Duration
+}
+
+func (m *minrtt) com(newrtt time.Duration) {
+	if m.n > minRRTSamplingInterval {
+		m.n = 0
+		m.rtt = newrtt
+		return
+	}
+	m.rtt = time.Duration(_mini64(int64(m.rtt), int64(newrtt)))
+	m.n++
 }
 
 // Write
@@ -169,12 +189,13 @@ func (s *SWND) RecvAck(seq, ack, winSize uint16) (err error) {
 	s.logger.Info("SWND : recv ack , seq is", seq, ", ack is [", ack, "] , appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd)
 	// ack segment
 	seg := s.sent[seq]
-	if seg != nil {
-		err = seg.AckIi()
-		if err != nil {
-			s.logger.Error("SWND : seg ack err , err is", err)
-			return err
-		}
+	if seg == nil {
+		return nil
+	}
+	err = seg.AckIi()
+	if err != nil {
+		s.logger.Error("SWND : seg ack err , err is", err)
+		return err
 	}
 	// trim ack segment
 	s.trimAckSeg()
@@ -183,13 +204,26 @@ func (s *SWND) RecvAck(seq, ack, winSize uint16) (err error) {
 		s.logger.Error("SWND : recv ack send err , err is", err)
 		return err
 	}
-	// tre quick resend segment
-	seg = s.sent[ack]
-	if seg != nil {
-		err = seg.TryQResend()
-		if err != nil {
-			s.logger.Error("SWND : seg tryQResend err , err is", err)
-			return err
+	// try quick resend segment
+	err = s.quickResend(seq)
+	if err != nil {
+		s.logger.Error("SWND : quick resend err , err is", err)
+		return err
+	}
+	return nil
+}
+
+// quickResend
+func (s *SWND) quickResend(seq uint16) (err error) {
+	seqs := s.getTryResendSeqs(seq)
+	for _, seq := range seqs {
+		seg := s.sent[seq]
+		if seg != nil {
+			err = seg.TryQResend()
+			if err != nil {
+				s.logger.Error("SWND : seg tryQResend err , err is", err)
+				return err
+			}
 		}
 	}
 	return nil
@@ -199,46 +233,17 @@ func (s *SWND) RecvAck(seq, ack, winSize uint16) (err error) {
 func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 	switch e {
 	case EventEnd:
-		switch s.OverBose {
-		case true:
-			s.cwnd *= 2
-			if s.cwnd > obMaxCongWinSize {
-				s.cwnd = obMaxCongWinSize
-			}
-		case false:
-			if s.ssthresh <= s.cwnd {
-				s.cwnd += 1 // avoid cong
-			} else {
-				s.cwnd *= 2 // slow start
-			}
-			if s.cwnd > maxCongWinSize {
-				s.cwnd = maxCongWinSize
-			}
-		}
+		s.cwnd *= 2
+		s.cwnd = _mini64(s.cwnd, maxCongWinSize)
 		s.comRTO(float64(ec.rttm))
 		s.comSendWinSize()
 		s.logger.Info("SWND : segment ack rttm is", ec.rttm, ", rto is", s.rto)
 		return nil
 	case EventQResend:
-		switch s.OverBose {
-		case true:
-		case false:
-			s.ssthresh = _maxi64(s.cwnd/2, minSsthresh)
-			s.cwnd = s.ssthresh
-			s.comSendWinSize()
-		}
 		return nil
 	case EventResend:
-		switch s.OverBose {
-		case true:
-			s.cwnd--
-			if s.cwnd <= 0 {
-				s.cwnd = 1
-			}
-		case false:
-			s.ssthresh = _maxi64(s.cwnd/2, minSsthresh)
-			s.cwnd = 1
-		}
+		s.cwnd--
+		s.cwnd = _maxi64(s.cwnd, minCongWinSize)
 		s.comSendWinSize()
 		return nil
 	}
@@ -258,8 +263,8 @@ func (s *SWND) init() {
 		if s.FTag == "" {
 			s.FTag = "nil"
 		}
-		s.logger = gologging.GetLogger(s.String())
-		s.ssthresh = defSsthresh
+		s.logger = loggerfac.GetLogger(s.String())
+		//s.ssthresh = defSsthresh
 		s.tSeq = minSeqN
 		s.hSeq = s.tSeq
 		s.appBuffer = &bq{Size: appBufferSize}
@@ -267,21 +272,16 @@ func (s *SWND) init() {
 		s.flushTimer = time.NewTimer(clearReadySendInterval)
 		s.closeSignal = make(chan struct{})
 		s.sendFinish = make(chan struct{})
-		switch s.OverBose {
-		case true:
-			s.rto = ob_def_rto
-			s.rtts = ob_def_rto
-			s.rttd = ob_def_rto
-			s.rwnd = obDefRecWinSize
-			s.cwnd = obDefCongWinSize
-		case false:
-			s.rto = def_rto
-			s.rtts = def_rto
-			s.rttd = def_rto
-			s.rwnd = defRecWinSize
-			s.cwnd = defCongWinSize
-		}
+		s.rto = def_rto
+		s.rtts = def_rto
+		s.rttd = def_rto
+		s.rwnd = defRecWinSize
+		s.cwnd = defCongWinSize
 		s.swnd = s.cwnd
+		s.minrtt = &minrtt{
+			n:   0,
+			rtt: def_rto,
+		}
 		s.loopFlush()
 		s.loopPrint()
 	})
@@ -324,7 +324,7 @@ func (s *SWND) readMSS() (seg *segment) {
 	if len(bs) <= 0 {
 		return nil
 	}
-	return newSSegment(s.logger, s.OverBose, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
+	return newSSegment(s.logger, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
 }
 
 // readAny
@@ -339,7 +339,7 @@ func (s *SWND) readAny() (seg *segment) {
 	if len(bs) <= 0 {
 		return nil
 	}
-	return newSSegment(s.logger, s.OverBose, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
+	return newSSegment(s.logger, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
 }
 
 // send
@@ -400,7 +400,7 @@ func (s *SWND) Close() (err error) {
 		close(s.closeSignal)
 		select {
 		case <-s.sendFinish:
-		case <-time.After(closeTimeout):
+		case <-time.After(closeCheckAckTO + closeCheckFlushTO):
 			return errCloseTimeout
 		}
 
@@ -411,25 +411,16 @@ func (s *SWND) Close() (err error) {
 
 // comRTO
 func (s *SWND) comRTO(rttm float64) {
-	switch s.OverBose {
-	case true:
-		s.rto = ob_def_rto
-		//if s.rto < ob_min_rto {
-		//	s.rto = ob_min_rto
-		//}
-		//if s.rto > ob_max_rto {
-		//	s.rto = ob_max_rto
-		//}
-	case false:
-		s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
-		s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttm-float64(s.rtts)))
-		s.rto = s.rtts + 4*s.rttd
-		if s.rto < min_rto {
-			s.rto = min_rto
-		}
-		if s.rto > max_rto {
-			s.rto = max_rto
-		}
+	s.minrtt.com(time.Duration(rttm))
+	s.rto = s.minrtt.rtt
+	//s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
+	//s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttm-float64(s.rtts)))
+	//s.rto = s.rtts + 4*s.rttd
+	if s.rto < min_rto {
+		s.rto = min_rto
+	}
+	if s.rto > max_rto {
+		s.rto = max_rto
 	}
 }
 
@@ -496,4 +487,32 @@ func (s *SWND) loopPrint() {
 			}
 		}
 	}()
+}
+
+// getTryResendSeqs
+func (s *SWND) getTryResendSeqs(seq uint16) (seqs []uint16) {
+	seqIndex := -1
+	// sent segment seqs
+	index := 0
+	for sentSeq := s.hSeq; sentSeq != s.tSeq; sentSeq++ {
+		seqs = append(seqs, sentSeq)
+		if seq == sentSeq {
+			seqIndex = index
+			break
+		}
+		index++
+	}
+	if seqIndex == -1 {
+		return nil // illegal ack
+	}
+	if seqIndex < quickResendIfSkipGEN {
+		// 0 1 2
+		return nil // no segment need quick resend
+	}
+	//s.logger.Criticalf("getTryResendSeqs : seq is : %v seqIndex is : %v , seqs is %v , end seqs is : %v ", seq, seqIndex, seqs, seqs[:seqIndex-quickResendIfSkipGEN+1])
+	return seqs[:seqIndex-quickResendIfSkipGEN+1]
+	//if _conui16(ack, seqs) { // illegal ack
+	//	return nil
+	//}
+	//return seqs
 }

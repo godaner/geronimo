@@ -1,5 +1,8 @@
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da h1:KjTM2ks9d14ZYCvmHS9iAKVt9AyzRSqNU1qabPih5BY=
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da/go.mod h1:eHEWzANqSiWQsof+nXEI9bUVUyV6F53Fp89EuCh2EAA=
+github.com/godaner/geronimo v1.0.1/go.mod h1:fDBrnBIhXmhIE05Hbnem/nv3a6jcttXXXAyDmGdvrQs=
+github.com/godaner/logger v1.0.1 h1:6MnqVYySz7toTD/jMRp79zKBwdQpdc+iRVPHrRYFmdE=
+github.com/godaner/logger v1.0.1/go.mod h1:1lUrouVUMvjIILgVIRf+zkvO9oDshFJpxI6FrseUld4=
 github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1 h1:EGx4pi6eqNxGaHF6qqu48+N2wcFQ5qg5FXgOdqsJ5d8=
 github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1/go.mod h1:wJfORRmW1u3UXTncJ5qlYoELFm8eSnnEO6hX4iZ3EWY=
 github.com/jtolds/gls v4.20.0+incompatible h1:xdiiI2gbIgH/gLH7ADydsJ1uDOEzR8yvV7C0MuV77Wo=

@@ -2,20 +2,20 @@ package win
 
 import (
 	"errors"
-	"github.com/godaner/geronimo/logger"
+	"github.com/godaner/logger"
 	"sync"
 	"time"
 )
 
 const (
-	quickResendIfAckGEN   = 3
-	obQuickResendIfAckGEN = 2
-	maxResendC            = 10
-	obMaxResendC          = 25
+	quickResendInterval = time.Duration(10) * time.Millisecond
+	maxTickerResendC    = 10
 )
 const (
-	obincrto = 1.5
-	incrto   = 2
+	incrto = time.Duration(15) * time.Millisecond
+)
+const (
+	waitAckTo = time.Duration(10) * time.Second
 )
 
 var (
@@ -46,39 +46,38 @@ type SegmentSender func(seq uint16, bs []byte) (err error)
 // segment
 type segment struct {
 	sync.RWMutex
-	rto      time.Duration // time.Duration
-	overBose bool
-	bs       []byte        // payload
-	seq      uint16        // seq
-	rsc      uint32        // resend count
-	ackc     uint16        // ack count , for quick resend
-	qrs      chan struct{} // for quick resend
-	qrsr     chan struct{} // for quick resend result
-	acks     chan struct{} // for ack segment
-	acksr    chan struct{} // for ack segment result
-	t        *time.Timer
-	logger   logger.Logger
-	es       eventSender
-	ss       SegmentSender // ss
-	acked    chan struct{} // is ack ?
+	rto       time.Duration
+	bs        []byte        // payload
+	seq       uint16        // seq
+	trsc      uint32        // ticker resend count
+	qrt       *time.Timer   // quick resend timer
+	qrs       chan struct{} // for quick resend
+	qrsr      chan struct{} // for quick resend result
+	acks      chan struct{} // for ack segment
+	acksr     chan struct{} // for ack segment result
+	rst, rstt *time.Timer   // resend timer ; resend timeout timer
+	logger    logger.Logger
+	es        eventSender
+	ss        SegmentSender // ss
+	acked     chan struct{} // is ack ?
 }
 
 // newSSegment
-func newSSegment(logger logger.Logger, overBose bool, seq uint16, bs []byte, rto time.Duration, es eventSender, sender SegmentSender) (s *segment) {
+func newSSegment(logger logger.Logger, seq uint16, bs []byte, rto time.Duration, es eventSender, sender SegmentSender) (s *segment) {
 	return &segment{
-		overBose: overBose,
-		rto:      rto,
-		bs:       bs,
-		seq:      seq,
-		rsc:      0,
-		ackc:     0,
-		qrs:      make(chan struct{}),
-		qrsr:     make(chan struct{}),
-		acks:     make(chan struct{}),
-		acksr:    make(chan struct{}),
-		acked:    make(chan struct{}),
-		t:        nil,
-		logger:   logger,
+		rto:    rto,
+		bs:     bs,
+		seq:    seq,
+		trsc:   0,
+		qrs:    make(chan struct{}),
+		qrsr:   make(chan struct{}),
+		acks:   make(chan struct{}),
+		acksr:  make(chan struct{}),
+		acked:  make(chan struct{}),
+		qrt:    time.NewTimer(time.Duration(1) * time.Nanosecond),
+		rst:    nil,
+		rstt:   nil,
+		logger: logger,
 		es: func(e event, ec *eContext) (err error) {
 			if es != nil {
 				return es(e, ec)
@@ -162,24 +161,14 @@ func (s *segment) TryQResend() (err error) {
 	if s.isAck() {
 		return
 	}
-	switch s.overBose {
-	case true:
-		if s.ackc >= obQuickResendIfAckGEN {
-			s.ackc = 0
-			s.triggerQResend()
-		} else {
-			s.ackc++
-		}
-
-	case false:
-		if s.ackc >= quickResendIfAckGEN {
-			s.ackc = 0
-			s.triggerQResend()
-		} else {
-			s.ackc++
-		}
+	select {
+	case <-s.qrt.C:
+		s.triggerQResend()
+		s.qrt.Reset(quickResendInterval)
+		return nil
+	default:
+		return nil
 	}
-	return nil
 }
 func (s *segment) triggerQResend() {
 	select {
@@ -202,8 +191,9 @@ func (s *segment) triggerQResend() {
 
 // setResend
 func (s *segment) setResend() {
-	s.t = time.NewTimer(s.rto)
 	rttms := time.Now()
+	s.rstt = time.NewTimer(waitAckTo)
+	s.rst = time.NewTimer(s.rto)
 	go func() {
 		endBy := EndByUnknown
 		defer func() {
@@ -211,13 +201,16 @@ func (s *segment) setResend() {
 		}()
 		for {
 			select {
-			//case <-s.acked:
-			//	return
-			case <-s.t.C:
+			case <-s.rstt.C:
+				endBy = EndByResendTo
+				return
+			case <-s.rst.C:
 				err := s.tickerResend()
 				if err != nil {
-					if err == errResendTo {
-						endBy = EndByResendTo
+					if err.Error() == errResendTo.Error() { // can't resend by ticker
+						s.rst.Reset(waitAckTo * 2)
+						//endBy = EndByResendTo
+						continue
 					}
 					return
 				}
@@ -225,9 +218,6 @@ func (s *segment) setResend() {
 			case <-s.qrs:
 				err := s.quickResend()
 				if err != nil {
-					if err == errResendTo {
-						endBy = EndByResendTo
-					}
 					return
 				}
 				continue
@@ -239,56 +229,28 @@ func (s *segment) setResend() {
 
 	}()
 }
-func (s *segment) resend() (err error) {
-	switch s.overBose {
-	case true:
-		if obMaxResendC < s.rsc {
-			return errResendTo
-		}
-	case false:
-		if maxResendC < s.rsc {
-			return errResendTo
-		}
-	}
-	s.rsc++
-	s.incRTO()
-	s.t.Reset(s.rto)
-	err = s.ss(s.seq, s.bs)
-	if err != nil {
-		return err
-	}
-	return nil
-}
 
 // incRTO
 func (s *segment) incRTO() {
-	switch s.overBose {
-	case true:
-		s.rto = time.Duration(obincrto * float64(s.rto))
-		if s.rto < ob_min_rto {
-			s.rto = ob_min_rto
-		}
-		if s.rto > ob_max_rto {
-			s.rto = ob_max_rto
-		}
-	case false:
-		s.rto = time.Duration(incrto * float64(s.rto))
-		if s.rto < min_rto {
-			s.rto = min_rto
-		}
-		if s.rto > max_rto {
-			s.rto = max_rto
-		}
+	s.rto = s.rto + incrto
+	if s.rto < min_rto {
+		s.rto = min_rto
+	}
+	if s.rto > max_rto {
+		s.rto = max_rto
 	}
 }
 
 // tickerResend
 func (s *segment) tickerResend() (err error) {
-	//defer func() {
-	//	s.es(EventResend, &eContext{})
-	//}()
 	s.logger.Info("segment#tickerResend : ticker resend , seq is [", s.seq, "] , rto is", s.rto)
-	err = s.resend()
+	if maxTickerResendC < s.trsc {
+		return errResendTo
+	}
+	s.trsc++
+	s.incRTO()
+	s.rst.Reset(s.rto)
+	err = s.ss(s.seq, s.bs)
 	if err != nil {
 		s.logger.Error("segment#tickerResend : ticker resend err , seq is [", s.seq, "] , rto is", s.rto, ", err is", err.Error())
 		return err
@@ -309,7 +271,8 @@ func (s *segment) quickResend() (err error) {
 		}
 	}()
 	s.logger.Info("segment#quickResend : quick resend , seq is [", s.seq, "] , rto is", s.rto)
-	err = s.resend()
+	s.rst.Reset(s.rto)
+	err = s.ss(s.seq, s.bs)
 	if err != nil {
 		s.logger.Error("segment#quickResend : quick resend err , seq is [", s.seq, "] , rto is", s.rto, ", err is", err.Error())
 		return err
@@ -320,7 +283,9 @@ func (s *segment) quickResend() (err error) {
 
 // endResend
 func (s *segment) endResend(rttms time.Time, endBy endBy) {
-	s.t.Stop()
+	s.rst.Stop()
+	s.rstt.Stop()
+	s.qrt.Stop()
 	close(s.acked)
 	s.es(EventEnd, &eContext{
 		rttm: time.Now().Sub(rttms),

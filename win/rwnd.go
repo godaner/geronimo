@@ -3,8 +3,8 @@ package win
 import (
 	"errors"
 	"fmt"
-	"github.com/godaner/geronimo/logger"
-	gologging "github.com/godaner/geronimo/logger/go-logging"
+	"github.com/godaner/logger"
+	loggerfac "github.com/godaner/logger/factory"
 	"io"
 	"sync"
 	"time"
@@ -33,7 +33,6 @@ type AckSender func(seqN, ack, receiveWinSize uint16) (err error)
 type RWND struct {
 	sync.Mutex
 	sync.Once
-	OverBose    bool
 	rwnd        int64
 	readLock    sync.RWMutex
 	appBuffer   *bq                 // to app
@@ -87,7 +86,7 @@ func (r *RWND) Recv(seqN uint16, bs []byte) (err error) {
 	default:
 	}
 	// illegal seq ?
-	r.logger.Info("RWND : recv seq is [", seqN, "] , segment len is", len(bs))
+	r.logger.Info("RWND : recv seq is [", seqN, "] , segment len is", len(bs),", tailSeq is",r.tailSeq)
 	if !r.legalSeqN(seqN) {
 		return
 	}
@@ -103,17 +102,12 @@ func (r *RWND) init() {
 		if r.FTag == "" {
 			r.FTag = "nil"
 		}
-		r.logger = gologging.GetLogger(r.String())
+		r.logger = loggerfac.GetLogger(r.String())
 		r.tailSeq = minSeqN
 		r.appBuffer = &bq{Size: appBufferSize}
 		r.recved = make(map[uint16]*segment)
 		r.closeSignal = make(chan struct{})
-		switch r.OverBose {
-		case true:
-			r.rwnd = obDefRecWinSize
-		case false:
-			r.rwnd = defRecWinSize
-		}
+		r.rwnd = defRecWinSize
 		r.loopPrint()
 	})
 }
@@ -161,12 +155,10 @@ func (r *RWND) ack(seqN uint16, ackN *uint16) {
 		ackN = &a
 	}
 	r.logger.Info("RWND : send ack , seq is", seqN, ", ack is [", *ackN, "]")
-	go func() {
-		err := r.AckSender(seqN, *ackN, 0)
-		if err != nil {
-			r.logger.Error("RWND : ack callback err , err is", err.Error())
-		}
-	}()
+	err := r.AckSender(seqN, *ackN, 0)
+	if err != nil {
+		r.logger.Error("RWND : ack callback err , err is", err.Error())
+	}
 }
 
 // legalSeqN
@@ -180,8 +172,8 @@ func (r *RWND) legalSeqN(seqN uint16) (yes bool) {
 	}
 	// illegal
 	ackN := seqN + 1
-	r.ack(seqN, &ackN)
 	r.logger.Warning("RWND : illegal seqN , recv seq is [", seqN, "]", ", ack is", ackN)
+	r.ack(seqN, &ackN)
 	return false
 }
 
