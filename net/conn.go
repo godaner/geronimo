@@ -21,8 +21,8 @@ const (
 	udpmss = 1472
 )
 const (
-	keepalive   = time.Duration(3) * time.Second
-	keepaliveTo = 4 * keepalive
+	keepalive   = time.Duration(5) * time.Second
+	keepaliveTo = 5 * keepalive
 )
 const (
 	syn1ResendTime    = time.Duration(100) * time.Millisecond
