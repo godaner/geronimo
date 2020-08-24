@@ -31,7 +31,7 @@ const (
 	quickResendIfSkipGEN = 2
 )
 const (
-	defCongWinSize = 2
+	defCongWinSize = 32
 	defRecWinSize  = 256
 	maxCongWinSize = 256
 	minCongWinSize = 2
@@ -41,7 +41,7 @@ const (
 )
 
 const (
-	defSsthresh = 8
+	defSsthresh = 64
 	minSsthresh = 2
 )
 const (
