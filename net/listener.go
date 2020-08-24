@@ -92,7 +92,6 @@ func (g *GListener) init() {
 					gcI, _ := g.gcs.Load(rAddr.String())
 					gc, _ := gcI.(*GConn)
 					if gc == nil && m1.Flag()&rule.FlagSYN1 == rule.FlagSYN1 {
-						fmt.Println("aaaaaaaaaa , "+rAddr.String())
 						// first connect
 						gc = &GConn{
 							UDPConn: g.c,

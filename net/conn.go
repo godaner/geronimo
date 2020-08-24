@@ -605,7 +605,6 @@ func (g *GConn) wait2msl() {
 // toAccept
 func (g *GConn) toAccept() {
 	g.toAcceptOnce.Do(func() {
-		fmt.Println("ccccccccccccccccccc"+g.RemoteAddr().String())
 		g.lis.RecvNewConn(&acceptRes{c: g, err: nil})
 	})
 }

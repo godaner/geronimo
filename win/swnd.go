@@ -32,15 +32,15 @@ const (
 )
 const (
 	defCongWinSize = 16
-	defRecWinSize  = 32
-	maxCongWinSize = 32
+	defRecWinSize  = 256
+	maxCongWinSize = 256
 	minCongWinSize = 2
 )
 
-const (
+//const (
 //defSsthresh = 8
 //minSsthresh = 2
-)
+//)
 const (
 	mss = 1472 - 14 - 16 // - protocol len , - vi len
 )
@@ -217,7 +217,7 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		s.cwnd = _mini64(s.cwnd, maxCongWinSize)
 		s.comRTO(float64(ec.rttm))
 		s.comSendWinSize()
-		s.logger.Info("SWND : segment ack rttm is", ec.rttm, ", rto is", s.rto)
+		s.logger.Critical("SWND : segment ack rttm is", ec.rttm, ", rto is", s.rto)
 		return nil
 	case EventQResend:
 		return nil
