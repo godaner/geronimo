@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	quickResendInterval = time.Duration(5) * time.Millisecond
-	maxTickerResendC    = 15
+	quickResendInterval = time.Duration(10) * time.Millisecond
+	maxTickerResendC    = 10
 )
 const (
 	incrto = time.Duration(15) * time.Millisecond

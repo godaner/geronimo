@@ -31,7 +31,7 @@ const (
 	quickResendIfSkipGEN = 2
 )
 const (
-	defCongWinSize = 32
+	defCongWinSize = 16
 	defRecWinSize  = 256
 	maxCongWinSize = 256
 	minCongWinSize = 2
@@ -40,10 +40,10 @@ const (
 	minRRTSamplingInterval = 10
 )
 
-//const (
-//defSsthresh = 8
-//minSsthresh = 2
-//)
+const (
+	defSsthresh = 64
+	minSsthresh = 2
+)
 const (
 	mss = 1472 - 14 - 16 // - protocol len , - vi len
 )
@@ -56,7 +56,7 @@ const (
 	//rttd_b  = float64(0.25)
 	minrtt2rto = time.Duration(15) * time.Millisecond
 	min_rto    = time.Duration(1) * time.Nanosecond
-	max_rto    = time.Duration(200) * time.Millisecond
+	max_rto    = time.Duration(500) * time.Millisecond
 	def_rto    = time.Duration(100) * time.Millisecond
 )
 const (
@@ -96,9 +96,9 @@ func init() {
 	if defCongWinSize <= 0 {
 		panic("defCongWinSize <= 0")
 	}
-	//if minSsthresh > defSsthresh {
-	//	panic("minSsthresh > defSsthresh")
-	//}
+	if minSsthresh > defSsthresh {
+		panic("minSsthresh > defSsthresh")
+	}
 }
 func _maxi64(a, b int64) (c int64) {
 	if a > b {
@@ -116,17 +116,17 @@ func _mini64(a, b int64) (c int64) {
 type SWND struct {
 	sync.Once
 	sync.RWMutex
-	writeLock  sync.RWMutex
-	appBuffer  *bq                 // from app , wait for send
-	sent       map[uint16]*segment // sent segments
-	flushTimer *time.Timer         // loopFlush not send data
-	swnd       int64               // send window size , swnd = min(cwnd,rwnd)
-	cwnd       int64               // congestion window size
-	rwnd       int64               // receive window size
-	hSeq       uint16              // current head seq , location is head
-	tSeq       uint16              // current tail seq , location is tail
-	minrtt     *minrtt
-	//ssthresh                int64               // ssthresh
+	writeLock               sync.RWMutex
+	appBuffer               *bq                 // from app , wait for send
+	sent                    map[uint16]*segment // sent segments
+	flushTimer              *time.Timer         // loopFlush not send data
+	swnd                    int64               // send window size , swnd = min(cwnd,rwnd)
+	cwnd                    int64               // congestion window size
+	rwnd                    int64               // receive window size
+	hSeq                    uint16              // current head seq , location is head
+	tSeq                    uint16              // current tail seq , location is tail
+	minrtt                  *minrtt
+	ssthresh                int64 // ssthresh
 	rttd, rtts, rto         time.Duration
 	sendFinish, closeSignal chan struct{}
 	logger                  logger.Logger
@@ -234,7 +234,11 @@ func (s *SWND) quickResend(seq uint16) (err error) {
 func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 	switch e {
 	case EventEnd:
-		s.cwnd *= 2
+		if s.ssthresh <= s.cwnd {
+			s.cwnd += 1 // avoid cong
+		} else {
+			s.cwnd *= 2 // slow start
+		}
 		s.cwnd = _mini64(s.cwnd, maxCongWinSize)
 		s.comRTO(float64(ec.rttm))
 		s.comSendWinSize()
@@ -265,7 +269,7 @@ func (s *SWND) init() {
 			s.FTag = "nil"
 		}
 		s.logger = loggerfac.GetLogger(s.String())
-		//s.ssthresh = defSsthresh
+		s.ssthresh = defSsthresh
 		s.tSeq = minSeqN
 		s.hSeq = s.tSeq
 		s.appBuffer = &bq{Size: appBufferSize}
