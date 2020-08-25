@@ -9,7 +9,7 @@ import (
 
 const (
 	//quickResendInterval = time.Duration(300) * time.Millisecond
-	maxTickerResendC    = 3
+	maxTickerResendC    = 5
 )
 const (
 	incrto = 0.5
@@ -164,7 +164,7 @@ func (s *segment) TryQResend() (err error) {
 	case <-s.qrt.C:
 		s.triggerQResend()
 		//s.qrt.Reset(quickResendInterval)
-		s.qrt.Reset(s.rto/3) // 300 -> 100
+		s.qrt.Reset(s.rto/4)
 		return nil
 	default:
 		return nil
