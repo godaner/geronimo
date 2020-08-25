@@ -9,7 +9,7 @@ import (
 
 const (
 	//quickResendInterval = time.Duration(300) * time.Millisecond
-	maxTickerResendC    = 5
+	maxTickerResendC    = 8
 )
 const (
 	incrto = 0.5
