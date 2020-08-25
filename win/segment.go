@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	quickResendInterval = time.Duration(10) * time.Millisecond
-	maxTickerResendC    = 10
+	//quickResendInterval = time.Duration(300) * time.Millisecond
+	maxTickerResendC    = 3
 )
 const (
-	incrto = 1.5
+	incrto = 0.5
 )
 const (
 	waitAckTo = time.Duration(10) * time.Second
@@ -60,14 +60,16 @@ type segment struct {
 	es        eventSender
 	ss        SegmentSender // ss
 	acked     chan struct{} // is ack ?
+	s         *SWND
 }
 
 // newSSegment
-func newSSegment(logger logger.Logger, seq uint16, bs []byte, rto time.Duration, es eventSender, sender SegmentSender) (s *segment) {
+func newSSegment(s *SWND, bs []byte) (seg *segment) {
 	return &segment{
-		rto:    rto,
+		s:      s,
+		rto:    s.rto,
 		bs:     bs,
-		seq:    seq,
+		seq:    s.tSeq,
 		trsc:   0,
 		qrs:    make(chan struct{}),
 		qrsr:   make(chan struct{}),
@@ -77,16 +79,13 @@ func newSSegment(logger logger.Logger, seq uint16, bs []byte, rto time.Duration,
 		qrt:    time.NewTimer(time.Duration(1) * time.Nanosecond),
 		rst:    nil,
 		rstt:   nil,
-		logger: logger,
+		logger: s.logger,
 		es: func(e event, ec *eContext) (err error) {
-			if es != nil {
-				return es(e, ec)
-			}
-			return nil
+			return s.segmentEvent(e, ec)
 		},
 		ss: func(seq uint16, bs []byte) (err error) {
 			s.logger.Info("segment : send , seq is [", seq, "] , rto is", s.rto)
-			return sender(seq, bs)
+			return s.SegmentSender(seq, bs)
 		},
 	}
 }
@@ -164,7 +163,8 @@ func (s *segment) TryQResend() (err error) {
 	select {
 	case <-s.qrt.C:
 		s.triggerQResend()
-		s.qrt.Reset(quickResendInterval)
+		//s.qrt.Reset(quickResendInterval)
+		s.qrt.Reset(s.rto/3) // 300 -> 100
 		return nil
 	default:
 		return nil
@@ -232,7 +232,7 @@ func (s *segment) setResend() {
 
 // incRTO
 func (s *segment) incRTO() {
-	s.rto = time.Duration(float64(s.rto) * incrto)
+	s.rto = s.rto + time.Duration(float64(s.s.rto)*incrto)
 	if s.rto < min_rto {
 		s.rto = min_rto
 	}

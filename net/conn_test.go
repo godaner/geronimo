@@ -397,6 +397,8 @@ func TestGConn_Read(t *testing.T) {
 				panic(err)
 			}
 			go func() {
+				t := time.NewTicker(time.Second)
+				bytes := 0
 				for {
 					bs := make([]byte, len(s), len(s))
 					io.ReadFull(c2, bs)
@@ -406,6 +408,16 @@ func TestGConn_Read(t *testing.T) {
 					if ssmd5 != smd5 {
 						//time.Sleep(1*time.Second)
 						panic("not right md5")
+					}
+					bytes += len(s)
+					select {
+					case <-t.C:
+						kbs := bytes / 1024
+						mbs:=kbs/1024
+						fmt.Println( kbs,"KB/s ," , mbs,"MB/s")
+						bytes = 0
+					default:
+
 					}
 				}
 			}()
@@ -454,7 +466,7 @@ func TestGConn_Read2(t *testing.T) {
 		l, err := Listen(&GAddr{
 			IP:   "192.168.6.6",
 			Port: 2222,
-		},SetEnc("aes-256-cfb@123qwe"))
+		}, SetEnc("aes-256-cfb@123qwe"))
 		if err != nil {
 			panic(err)
 		}
@@ -464,6 +476,8 @@ func TestGConn_Read2(t *testing.T) {
 				panic(err)
 			}
 			go func() {
+				t := time.NewTicker(time.Second)
+				bytes := 0
 				for {
 					bs := make([]byte, len(s), len(s))
 					io.ReadFull(c2, bs)
@@ -474,18 +488,28 @@ func TestGConn_Read2(t *testing.T) {
 						//time.Sleep(1*time.Second)
 						panic("not right md5")
 					}
+					bytes += len(s)
+					select {
+					case <-t.C:
+						kbs := bytes / 1024
+						mbs:=kbs/1024
+						fmt.Println( kbs,"KB/s ," , mbs,"MB/s")
+						bytes = 0
+					default:
+
+					}
 				}
 			}()
 		}
 
 	}()
 	time.Sleep(500 * time.Millisecond)
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 1; i++ {
 		go func() {
 			c1, err := Dial(&GAddr{
 				IP:   "192.168.6.6",
 				Port: 2222,
-			},SetEnc("aes-256-cfb@123qwe"))
+			}, SetEnc("aes-256-cfb@123qwe"))
 			if err != nil {
 				panic(err)
 			}

@@ -32,8 +32,8 @@ const (
 )
 const (
 	defCongWinSize = 4
-	defRecWinSize  = 256
-	maxCongWinSize = 256
+	defRecWinSize  = 512
+	maxCongWinSize = 512
 	minCongWinSize = 2
 )
 const (
@@ -41,7 +41,7 @@ const (
 )
 
 const (
-	defSsthresh = 8
+	defSsthresh = 128
 	minSsthresh = 2
 )
 const (
@@ -54,10 +54,10 @@ const (
 const (
 	//rtts_a  = float64(0.125)
 	//rttd_b  = float64(0.25)
-	minrtt2rto = time.Duration(0) * time.Millisecond
-	min_rto    = time.Duration(100) * time.Millisecond
-	max_rto    = time.Duration(60) * time.Second
-	def_rto    = time.Duration(500) * time.Millisecond
+	//minrtt2rto = time.Duration(0) * time.Millisecond
+	min_rto = time.Duration(100) * time.Millisecond
+	max_rto = time.Duration(500) * time.Millisecond
+	def_rto = time.Duration(200) * time.Millisecond
 )
 const (
 	// flush
@@ -329,7 +329,7 @@ func (s *SWND) readMSS() (seg *segment) {
 	if len(bs) <= 0 {
 		return nil
 	}
-	return newSSegment(s.logger, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
+	return newSSegment(s, bs)
 }
 
 // readAny
@@ -344,7 +344,7 @@ func (s *SWND) readAny() (seg *segment) {
 	if len(bs) <= 0 {
 		return nil
 	}
-	return newSSegment(s.logger, s.tSeq, bs, s.rto, s.segmentEvent, s.SegmentSender)
+	return newSSegment(s, bs)
 }
 
 // send
@@ -417,8 +417,8 @@ func (s *SWND) Close() (err error) {
 // comRTO
 func (s *SWND) comRTO(rttm float64) {
 	s.minrtt.com(time.Duration(rttm))
-	//s.rto = s.minrtt.rtt
-	s.rto = s.minrtt.rtt + minrtt2rto
+	s.rto = s.minrtt.rtt
+	//s.rto = s.minrtt.rtt + minrtt2rto
 	//s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
 	//s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttm-float64(s.rtts)))
 	//s.rto = s.rtts + 4*s.rttd
