@@ -37,7 +37,7 @@ const (
 	minCongWinSize = 2
 )
 const (
-	minRRTSamplingInterval = 10
+	rtpropSamplingInterval = time.Duration(30)
 )
 
 const (
@@ -54,10 +54,10 @@ const (
 const (
 	//rtts_a  = float64(0.125)
 	//rttd_b  = float64(0.25)
-	minrtt2rto = time.Duration(-30) * time.Millisecond
-	min_rto    = time.Duration(100) * time.Millisecond
-	max_rto    = time.Duration(500) * time.Millisecond
-	def_rto    = time.Duration(200) * time.Millisecond
+	min_rto = time.Duration(100) * time.Millisecond
+	max_rto = time.Duration(500) * time.Millisecond
+	//def_rto    = time.Duration(200) * time.Millisecond
+	def_rtprop = time.Duration(200) * time.Millisecond
 )
 const (
 	// flush
@@ -116,38 +116,63 @@ func _mini64(a, b int64) (c int64) {
 type SWND struct {
 	sync.Once
 	sync.RWMutex
-	writeLock               sync.RWMutex
-	appBuffer               *bq                 // from app , wait for send
-	sent                    map[uint16]*segment // sent segments
-	flushTimer              *time.Timer         // loopFlush not send data
-	swnd                    int64               // send window size , swnd = min(cwnd,rwnd)
-	cwnd                    int64               // congestion window size
-	rwnd                    int64               // receive window size
-	hSeq                    uint16              // current head seq , location is head
-	tSeq                    uint16              // current tail seq , location is tail
-	minrtt                  *minrtt
-	ssthresh                int64 // ssthresh
-	rttd, rtts, rto         time.Duration
+	writeLock  sync.RWMutex
+	appBuffer  *bq                 // from app , wait for send
+	sent       map[uint16]*segment // sent segments
+	flushTimer *time.Timer         // loopFlush not send data
+	swnd       int64               // send window size , swnd = min(cwnd,rwnd)
+	cwnd       int64               // congestion window size
+	rwnd       int64               // receive window size
+	hSeq       uint16              // current head seq , location is head
+	tSeq       uint16              // current tail seq , location is tail
+	rtprop     *rtprop
+	ssthresh   int64 // ssthresh
+	//rttd, rtts, rto         time.Duration
+	rto                     time.Duration
 	sendFinish, closeSignal chan struct{}
 	logger                  logger.Logger
 	SegmentSender           SegmentSender
 	FTag                    string
 }
 
-// minrtt
-type minrtt struct {
-	n   uint8
-	rtt time.Duration
+// rtprop
+type rtprop struct {
+	sync.Once
+	n     uint8
+	v     time.Duration
+	t     *time.Timer
+	cs    chan struct{}
+	initV bool
 }
 
-func (m *minrtt) com(newrtt time.Duration) {
-	if m.n > minRRTSamplingInterval {
-		m.n = 0
-		m.rtt = newrtt
+func (r *rtprop) init() {
+	r.Do(func() {
+		r.t = time.NewTimer(rtpropSamplingInterval)
+		r.v = def_rtprop
+		r.initV = true
+	})
+}
+func (r *rtprop) Get() (v time.Duration) {
+	r.init()
+	return r.v
+}
+func (r *rtprop) com(newrtt time.Duration) {
+	r.init()
+	select {
+	case <-r.cs:
+		return
+	case <-r.t.C:
+		r.t.Reset(rtpropSamplingInterval)
+		r.v = def_rtprop
+		r.initV = true
+	default:
+	}
+	if r.initV {
+		r.v = newrtt
+		r.initV = false
 		return
 	}
-	m.rtt = time.Duration(_mini64(int64(m.rtt), int64(newrtt)))
-	m.n++
+	r.v = time.Duration(_mini64(int64(r.v), int64(newrtt)))
 }
 
 // Write
@@ -277,16 +302,15 @@ func (s *SWND) init() {
 		s.flushTimer = time.NewTimer(clearReadySendInterval)
 		s.closeSignal = make(chan struct{})
 		s.sendFinish = make(chan struct{})
-		s.rto = def_rto
-		s.rtts = def_rto
-		s.rttd = def_rto
+		s.rtprop = &rtprop{
+			cs: s.closeSignal,
+		}
+		s.rto = s.rtprop.Get()
+		//s.rtts = s.rto
+		//s.rttd = s.rto
 		s.rwnd = defRecWinSize
 		s.cwnd = defCongWinSize
 		s.swnd = s.cwnd
-		s.minrtt = &minrtt{
-			n:   0,
-			rtt: def_rto,
-		}
 		s.loopFlush()
 		s.loopPrint()
 	})
@@ -416,9 +440,9 @@ func (s *SWND) Close() (err error) {
 
 // comRTO
 func (s *SWND) comRTO(rttm float64) {
-	s.minrtt.com(time.Duration(rttm))
-	//s.rto = s.minrtt.rtt
-	s.rto = s.minrtt.rtt + minrtt2rto
+	s.rtprop.com(time.Duration(rttm))
+	s.rto = s.rtprop.v
+	//s.rto = s.minrtt.rtt + minrtt2rto
 	//s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
 	//s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttm-float64(s.rtts)))
 	//s.rto = s.rtts + 4*s.rttd
