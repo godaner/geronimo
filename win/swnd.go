@@ -31,9 +31,9 @@ const (
 	quickResendIfSkipGEN = 2
 )
 const (
-	defCongWinSize = 16
-	defRecWinSize  = 128
-	maxCongWinSize = 128
+	defCongWinSize = 4
+	defRecWinSize  = 256
+	maxCongWinSize = 256
 	minCongWinSize = 2
 )
 const (
@@ -54,10 +54,10 @@ const (
 const (
 	//rtts_a  = float64(0.125)
 	//rttd_b  = float64(0.25)
-	minrtt2rto = time.Duration(15) * time.Millisecond
-	min_rto    = time.Duration(1) * time.Nanosecond
-	max_rto    = time.Duration(500) * time.Millisecond
-	def_rto    = time.Duration(100) * time.Millisecond
+	minrtt2rto = time.Duration(0) * time.Millisecond
+	min_rto    = time.Duration(100) * time.Millisecond
+	max_rto    = time.Duration(60) * time.Second
+	def_rto    = time.Duration(500) * time.Millisecond
 )
 const (
 	// flush
@@ -246,7 +246,7 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 		return nil
 	case EventQResend:
 		return nil
-	case EventResend:
+	case EventTickerResend:
 		s.cwnd--
 		s.cwnd = _maxi64(s.cwnd, minCongWinSize)
 		s.comSendWinSize()

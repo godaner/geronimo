@@ -12,7 +12,7 @@ const (
 	maxTickerResendC    = 10
 )
 const (
-	incrto = time.Duration(15) * time.Millisecond
+	incrto = 1.5
 )
 const (
 	waitAckTo = time.Duration(10) * time.Second
@@ -23,7 +23,7 @@ var (
 )
 
 const (
-	EventResend event = 1 << iota
+	EventTickerResend event = 1 << iota
 	EventQResend
 	EventEnd
 )
@@ -232,7 +232,7 @@ func (s *segment) setResend() {
 
 // incRTO
 func (s *segment) incRTO() {
-	s.rto = s.rto + incrto
+	s.rto = time.Duration(float64(s.rto) * incrto)
 	if s.rto < min_rto {
 		s.rto = min_rto
 	}
@@ -255,7 +255,7 @@ func (s *segment) tickerResend() (err error) {
 		s.logger.Error("segment#tickerResend : ticker resend err , seq is [", s.seq, "] , rto is", s.rto, ", err is", err.Error())
 		return err
 	}
-	s.es(EventResend, &eContext{})
+	s.es(EventTickerResend, &eContext{})
 	return nil
 }
 
