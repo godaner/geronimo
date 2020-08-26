@@ -9,7 +9,7 @@ import (
 
 const (
 	//quickResendInterval = time.Duration(300) * time.Millisecond
-	maxTickerResendC    = 8
+	maxTickerResendC = 8
 )
 const (
 	incrto = 0.5
@@ -36,8 +36,7 @@ const (
 type event uint8
 type endBy uint8
 type eContext struct {
-	rttm  time.Duration
-	endBy endBy
+	seg *segment
 }
 type eventSender func(e event, ec *eContext) (err error)
 
@@ -46,25 +45,28 @@ type SegmentSender func(seq uint16, bs []byte) (err error)
 // segment
 type segment struct {
 	sync.RWMutex
-	rto       time.Duration
-	bs        []byte        // payload
-	seq       uint16        // seq
-	trsc      uint32        // ticker resend count
-	qrt       *time.Timer   // quick resend timer
-	qrs       chan struct{} // for quick resend
-	qrsr      chan struct{} // for quick resend result
-	acks      chan struct{} // for ack segment
-	acksr     chan struct{} // for ack segment result
-	rst, rstt *time.Timer   // resend timer ; resend timeout timer
-	logger    logger.Logger
-	es        eventSender
-	ss        SegmentSender // ss
-	acked     chan struct{} // is ack ?
-	s         *SWND
+	rto        time.Duration
+	bs         []byte        // payload
+	seq        uint16        // seq
+	trsc       uint32        // ticker resend count
+	qrt        *time.Timer   // quick resend timer
+	qrs        chan struct{} // for quick resend
+	qrsr       chan struct{} // for quick resend result
+	acks       chan struct{} // for ack segment
+	acksr      chan struct{} // for ack segment result
+	rst, rstt  *time.Timer   // resend timer ; resend timeout timer
+	logger     logger.Logger
+	es         eventSender
+	ss         SegmentSender // ss
+	acked      chan struct{} // is ack ?
+	s          *SWND
+	rtts, rtte time.Time
+	rtt        time.Duration
+	endBy      endBy
 }
 
-// newSSegment
-func newSSegment(s *SWND, bs []byte) (seg *segment) {
+// NewSSegment
+func NewSSegment(s *SWND, bs []byte) (seg *segment) {
 	return &segment{
 		s:      s,
 		rto:    s.rto,
@@ -90,12 +92,18 @@ func newSSegment(s *SWND, bs []byte) (seg *segment) {
 	}
 }
 
-// newRSegment
-func newRSegment(seqN uint16, bs []byte) (rs *segment) {
+// NewRSegment
+func NewRSegment(seqN uint16, bs []byte) (rs *segment) {
 	return &segment{
 		seq: seqN,
 		bs:  bs,
 	}
+}
+
+func (s *segment) RTT() (rtt time.Duration) {
+	s.RLock()
+	defer s.RUnlock()
+	return s.rtt
 }
 func (s *segment) Bs() (bs []byte) {
 	s.RLock()
@@ -143,7 +151,9 @@ func (s *segment) AckIi() (err error) {
 		case <-s.acksr:
 			return
 		case <-time.After(time.Duration(10000) * time.Millisecond):
-			panic("wait ack segment result timeout")
+			//panic("wait ack segment result timeout")
+			s.logger.Warning("segment : wait ack segment result timeout , maybe resend be stop by other reason")
+			return nil
 		}
 		//case <-time.After(time.Duration(10000) * time.Millisecond):
 		//	panic("send ack segment signal timeout")
@@ -164,7 +174,7 @@ func (s *segment) TryQResend() (err error) {
 	case <-s.qrt.C:
 		s.triggerQResend()
 		//s.qrt.Reset(quickResendInterval)
-		s.qrt.Reset(s.rto/4)
+		s.qrt.Reset(s.rto / 4)
 		return nil
 	default:
 		return nil
@@ -191,18 +201,18 @@ func (s *segment) triggerQResend() {
 
 // setResend
 func (s *segment) setResend() {
-	rttms := time.Now()
+	s.rtts = time.Now()
 	s.rstt = time.NewTimer(waitAckTo)
 	s.rst = time.NewTimer(s.rto)
 	go func() {
-		endBy := EndByUnknown
+		s.endBy = EndByUnknown
 		defer func() {
-			s.endResend(rttms, endBy)
+			s.endResend()
 		}()
 		for {
 			select {
 			case <-s.rstt.C:
-				endBy = EndByResendTo
+				s.endBy = EndByResendTo
 				return
 			case <-s.rst.C:
 				err := s.tickerResend()
@@ -222,7 +232,7 @@ func (s *segment) setResend() {
 				}
 				continue
 			case <-s.acks:
-				endBy = EndByAck
+				s.endBy = EndByAck
 				return
 			}
 		}
@@ -282,15 +292,17 @@ func (s *segment) quickResend() (err error) {
 }
 
 // endResend
-func (s *segment) endResend(rttms time.Time, endBy endBy) {
+func (s *segment) endResend() {
+	s.rtte = time.Now()
+	s.rtt = s.rtte.Sub(s.rtts)
 	s.rst.Stop()
 	s.rstt.Stop()
 	s.qrt.Stop()
 	close(s.acked)
 	s.es(EventEnd, &eContext{
-		rttm: time.Now().Sub(rttms),
+		seg: s,
 	})
-	if endBy == EndByAck {
+	if s.endBy == EndByAck {
 		select {
 		case s.acksr <- struct{}{}:
 			return

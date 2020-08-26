@@ -34,10 +34,7 @@ const (
 	defCongWinSize = 32
 	defRecWinSize  = 512
 	maxCongWinSize = 512
-	minCongWinSize = 2
-)
-const (
-	rtpropSamplingInterval = time.Duration(30)
+	minCongWinSize = 4
 )
 
 const (
@@ -52,12 +49,8 @@ const (
 	appBufferSize = appBufferMSS * mss // n mss
 )
 const (
-	//rtts_a  = float64(0.125)
-	//rttd_b  = float64(0.25)
 	min_rto = time.Duration(100) * time.Millisecond
 	max_rto = time.Duration(500) * time.Millisecond
-	//def_rto    = time.Duration(200) * time.Millisecond
-	def_rtprop = time.Duration(200) * time.Millisecond
 )
 const (
 	// flush
@@ -133,46 +126,6 @@ type SWND struct {
 	logger                  logger.Logger
 	SegmentSender           SegmentSender
 	FTag                    string
-}
-
-// rtprop
-type rtprop struct {
-	sync.Once
-	n     uint8
-	v     time.Duration
-	t     *time.Timer
-	cs    chan struct{}
-	initV bool
-}
-
-func (r *rtprop) init() {
-	r.Do(func() {
-		r.t = time.NewTimer(rtpropSamplingInterval)
-		r.v = def_rtprop
-		r.initV = true
-	})
-}
-func (r *rtprop) Get() (v time.Duration) {
-	r.init()
-	return r.v
-}
-func (r *rtprop) com(newrtt time.Duration) {
-	r.init()
-	select {
-	case <-r.cs:
-		return
-	case <-r.t.C:
-		r.t.Reset(rtpropSamplingInterval)
-		r.v = def_rtprop
-		r.initV = true
-	default:
-	}
-	if r.initV {
-		r.v = newrtt
-		r.initV = false
-		return
-	}
-	r.v = time.Duration(_mini64(int64(r.v), int64(newrtt)))
 }
 
 // Write
@@ -265,9 +218,9 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 			s.cwnd *= 2 // slow start
 		}
 		s.cwnd = _mini64(s.cwnd, maxCongWinSize)
-		s.comRTO(float64(ec.rttm))
+		s.comRTO(ec.seg.RTT())
 		s.comSendWinSize()
-		s.logger.Info("SWND : segment ack rttm is", ec.rttm, ", rto is", s.rto)
+		s.logger.Info("SWND : segment ack rtt is", ec.seg.RTT(), ", rto is", s.rto)
 		return nil
 	case EventQResend:
 		return nil
@@ -303,11 +256,9 @@ func (s *SWND) init() {
 		s.closeSignal = make(chan struct{})
 		s.sendFinish = make(chan struct{})
 		s.rtprop = &rtprop{
-			cs: s.closeSignal,
+			CS: s.closeSignal,
 		}
 		s.rto = s.rtprop.Get()
-		//s.rtts = s.rto
-		//s.rttd = s.rto
 		s.rwnd = defRecWinSize
 		s.cwnd = defCongWinSize
 		s.swnd = s.cwnd
@@ -353,7 +304,7 @@ func (s *SWND) readMSS() (seg *segment) {
 	if len(bs) <= 0 {
 		return nil
 	}
-	return newSSegment(s, bs)
+	return NewSSegment(s, bs)
 }
 
 // readAny
@@ -368,7 +319,7 @@ func (s *SWND) readAny() (seg *segment) {
 	if len(bs) <= 0 {
 		return nil
 	}
-	return newSSegment(s, bs)
+	return NewSSegment(s, bs)
 }
 
 // send
@@ -439,12 +390,12 @@ func (s *SWND) Close() (err error) {
 }
 
 // comRTO
-func (s *SWND) comRTO(rttm float64) {
-	s.rtprop.com(time.Duration(rttm))
-	s.rto = s.rtprop.v
+func (s *SWND) comRTO(rtt time.Duration) {
+	s.rtprop.Com(rtt)
+	s.rto = s.rtprop.Get()
 	//s.rto = s.minrtt.rtt + minrtt2rto
-	//s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttm)
-	//s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttm-float64(s.rtts)))
+	//s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rtt)
+	//s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rtt-float64(s.rtts)))
 	//s.rto = s.rtts + 4*s.rttd
 	if s.rto < min_rto {
 		s.rto = min_rto

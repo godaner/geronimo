@@ -91,7 +91,7 @@ func (r *RWND) Recv(seqN uint16, bs []byte) (err error) {
 		return
 	}
 	// receive the segment
-	r.recv(newRSegment(seqN, bs))
+	r.recv(NewRSegment(seqN, bs))
 	return
 }
 func (r *RWND) String() string {
