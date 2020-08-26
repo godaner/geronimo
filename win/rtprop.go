@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	wr = time.Duration(30) * time.Second
+	wr = time.Duration(10) * time.Second
 )
 
 // rtprop
