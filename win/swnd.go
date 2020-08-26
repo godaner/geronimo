@@ -393,6 +393,7 @@ func (s *SWND) Close() (err error) {
 func (s *SWND) comRTO(rtt time.Duration) {
 	s.rtprop.Com(rtt)
 	s.rto = s.rtprop.Get()
+	s.logger.Info("SWND : new rto is :",s.rto)
 	//s.rto = s.minrtt.rtt + minrtt2rto
 	//s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rtt)
 	//s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rtt-float64(s.rtts)))

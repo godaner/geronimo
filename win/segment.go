@@ -3,7 +3,6 @@ package win
 import (
 	"errors"
 	"github.com/godaner/logger"
-	"sync"
 	"time"
 )
 
@@ -44,7 +43,7 @@ type SegmentSender func(seq uint16, bs []byte) (err error)
 
 // segment
 type segment struct {
-	sync.RWMutex
+	//sync.RWMutex
 	rto        time.Duration
 	bs         []byte        // payload
 	seq        uint16        // seq
@@ -101,24 +100,24 @@ func NewRSegment(seqN uint16, bs []byte) (rs *segment) {
 }
 
 func (s *segment) RTT() (rtt time.Duration) {
-	s.RLock()
-	defer s.RUnlock()
+	//s.RLock()
+	//defer s.RUnlock()
 	return s.rtt
 }
 func (s *segment) Bs() (bs []byte) {
-	s.RLock()
-	defer s.RUnlock()
+	//s.RLock()
+	//defer s.RUnlock()
 	return s.bs
 }
 func (s *segment) Seq() (seq uint16) {
-	s.RLock()
-	defer s.RUnlock()
+	//s.RLock()
+	//defer s.RUnlock()
 	return s.seq
 }
 
 func (s *segment) IsAck() (y bool) {
-	s.RLock()
-	defer s.RUnlock()
+	//s.RLock()
+	//defer s.RUnlock()
 	return s.isAck()
 }
 func (s *segment) isAck() (y bool) {
@@ -130,16 +129,16 @@ func (s *segment) isAck() (y bool) {
 	return false
 }
 func (s *segment) Send() (err error) {
-	s.Lock()
-	defer s.Unlock()
+	//s.Lock()
+	//defer s.Unlock()
 	s.setResend()
 	return s.ss(s.seq, s.bs)
 }
 
 // AckIi
 func (s *segment) AckIi() (err error) {
-	s.Lock()
-	defer s.Unlock()
+	//s.Lock()
+	//defer s.Unlock()
 	if s.isAck() {
 		return
 	}
@@ -151,8 +150,8 @@ func (s *segment) AckIi() (err error) {
 		case <-s.acksr:
 			return
 		case <-time.After(time.Duration(10000) * time.Millisecond):
-			//panic("wait ack segment result timeout")
-			s.logger.Warning("segment : wait ack segment result timeout , maybe resend be stop by other reason")
+			panic("wait ack segment result timeout")
+			//s.logger.Warning("segment : wait ack segment result timeout , maybe resend be stop by other reason")
 			return nil
 		}
 		//case <-time.After(time.Duration(10000) * time.Millisecond):
@@ -165,8 +164,8 @@ func (s *segment) AckIi() (err error) {
 
 // TryQResend
 func (s *segment) TryQResend() (err error) {
-	s.Lock()
-	defer s.Unlock()
+	//s.Lock()
+	//defer s.Unlock()
 	if s.isAck() {
 		return
 	}

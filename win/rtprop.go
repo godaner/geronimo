@@ -6,8 +6,7 @@ import (
 )
 
 const (
-	wr         = time.Duration(30) * time.Second
-	def_rtprop = time.Duration(500) * time.Millisecond
+	wr = time.Duration(30) * time.Second
 )
 
 // rtprop
@@ -23,7 +22,7 @@ type rtprop struct {
 func (r *rtprop) init() {
 	r.Do(func() {
 		r.t = time.NewTimer(wr)
-		r.v = def_rtprop
+		r.v = 0
 		r.initV = true
 	})
 }
