@@ -478,6 +478,7 @@ func (s *SWND) comRTO(rtt time.Duration) {
 	if s.rto > max_rto {
 		s.rto = max_rto
 	}
+	s.logger.Critical("comRTO : rtt",rtt,"rto",s.rto)
 }
 
 // flushLastSegment

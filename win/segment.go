@@ -11,7 +11,7 @@ const (
 	maxTickerResendC = 25
 )
 const (
-	incrto = 2
+	incrto = 1.5
 )
 const (
 	waitAckTo = time.Duration(10) * time.Second
@@ -241,7 +241,7 @@ func (s *segment) setResend() {
 
 // incRTO
 func (s *segment) incRTO() {
-	s.rto *= incrto
+	s.rto =time.Duration(float64(s.rto)*incrto)
 	if s.rto < min_rto {
 		s.rto = min_rto
 	}
