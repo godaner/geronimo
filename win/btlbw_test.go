@@ -11,6 +11,8 @@ func TestBtlBw_Com(t *testing.T) {
 		CS:make(chan struct{}),
 	}
 	go func() {
+
+		<-time.After(1*time.Second)
 		i:=0
 		for ; ;  {
 			b.Com()
@@ -23,7 +25,7 @@ func TestBtlBw_Com(t *testing.T) {
 		}
 	}()
 	for ; ;  {
-		<-time.After(1*time.Second)
+		<-time.After(500*time.Millisecond)
 		fmt.Println(b.Get())
 	}
 }

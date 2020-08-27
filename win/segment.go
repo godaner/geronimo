@@ -8,10 +8,10 @@ import (
 
 const (
 	//quickResendInterval = time.Duration(300) * time.Millisecond
-	maxTickerResendC = 8
+	maxTickerResendC = 25
 )
 const (
-	incrto = 0.5
+	incrto = 2
 )
 const (
 	waitAckTo = time.Duration(10) * time.Second
@@ -241,7 +241,7 @@ func (s *segment) setResend() {
 
 // incRTO
 func (s *segment) incRTO() {
-	s.rto = s.rto + time.Duration(float64(s.s.rto)*incrto)
+	s.rto *= incrto
 	if s.rto < min_rto {
 		s.rto = min_rto
 	}

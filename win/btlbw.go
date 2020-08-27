@@ -6,15 +6,17 @@ import (
 )
 
 const (
-	wb     = 10
-	wd     = time.Duration(1) * time.Second
-	def_bw = 0
+	wb        = time.Duration(5) * time.Second
+	wd        = time.Duration(1) * time.Second
+	//def_btlbw = float64(defCongWinSize) / float64(def_rtt)
+	def_btlbw = 0
 )
 
 // btlBw
 type btlBw struct {
 	sync.Once
-	n uint8
+	//n uint8
+	t *time.Timer
 	//lastDr       uint32
 	deliveryRate *deliveryRate
 	v            float64
@@ -26,8 +28,9 @@ type btlBw struct {
 
 func (b *btlBw) init() {
 	b.Do(func() {
+		b.v = def_btlbw
 		b.initV = true
-		b.v = def_bw
+		b.t = time.NewTimer(wb)
 		b.drs = make(chan float64)
 		b.deliveryRate = &deliveryRate{
 			DRS: b.drs,
@@ -56,10 +59,13 @@ func (b *btlBw) Com() {
 		return
 	default:
 	}
-	if b.n >= wb {
+	select {
+	case <-b.t.C:
 		b.deliveryRate.stop()
 		b.initV = true
-		return
+		b.t.Reset(wb)
+		//b.v = def_btlbw
+	default:
 	}
 	if b.deliveryRate.stoped() {
 		b.deliveryRate = &deliveryRate{
