@@ -3,6 +3,7 @@ package win
 import (
 	"errors"
 	"fmt"
+	"github.com/godaner/geronimo/bbr"
 	"github.com/godaner/logger"
 	loggerfac "github.com/godaner/logger/factory"
 	"math"
@@ -30,21 +31,7 @@ const (
 const (
 	quickResendIfSkipGEN = 2
 )
-const (
-	defCongWinSize = 32
-	defRecWinSize  = 512
-	maxCongWinSize = 512
-	minCongWinSize = 4
-)
 
-const (
-	StatusStartUp = "StatusStartUp"
-	StatusStable  = "StatusStable"
-)
-const (
-	defSsthresh = 256
-	minSsthresh = 2
-)
 const (
 	mss = 1472 - 14 - 16 // - protocol len , - vi len
 )
@@ -69,9 +56,7 @@ const (
 	clearReadySendInterval = time.Duration(10) * time.Millisecond
 )
 const (
-	startUPTIme = time.Duration(5) * time.Second
-	incTIme     = time.Duration(10) * time.Millisecond
-	decTIme     = time.Duration(10) * time.Millisecond
+	defRecWinSize = 32
 )
 
 var (
@@ -80,17 +65,12 @@ var (
 )
 
 func init() {
-	if maxSeqN <= minSeqN {
-		panic("maxSeqN <= minSeqN")
-	}
+
 	if defRecWinSize > maxSeqN {
 		panic("defRecWinSize > maxSeqN")
 	}
-	if defCongWinSize > defRecWinSize {
-		panic("defCongWinSize > defRecWinSize")
-	}
-	if defCongWinSize > defRecWinSize {
-		panic("defCongWinSize > defRecWinSize")
+	if maxSeqN <= minSeqN {
+		panic("maxSeqN <= minSeqN")
 	}
 	if max_rto <= min_rto {
 		panic("max_rto <= min_rto")
@@ -98,16 +78,12 @@ func init() {
 	if max_rto <= min_rto {
 		panic("max_rto <= min_rto")
 	}
-	if defCongWinSize <= 0 {
-		panic("defCongWinSize <= 0")
-	}
-	if minSsthresh > defSsthresh {
-		panic("minSsthresh > defSsthresh")
-	}
+
 }
 func _maxi64(a, b int64) (c int64) {
 	if a > b {
 		return a
+
 	}
 	return b
 }
@@ -121,30 +97,21 @@ func _mini64(a, b int64) (c int64) {
 type SWND struct {
 	sync.Once
 	sync.RWMutex
-	writeLock  sync.RWMutex
-	appBuffer  *bq                 // from app , wait for send
-	sent       map[uint16]*segment // sent segments
-	flushTimer *time.Timer         // loopFlush not send data
-	swnd       int64               // send window size , swnd = min(cwnd,rwnd)
-	cwnd       int64               // congestion window size
-	rwnd       int64               // receive window size
-	hSeq       uint16              // current head seq , location is head
-	tSeq       uint16              // current tail seq , location is tail
-	rtprop     *rtprop
-	btlBw      *btlBw
-	//lastBDP                 int64
-	lastBtlbw               float64
-	lastRtprop              time.Duration
-	ssthresh                int64 // ssthresh
+	writeLock               sync.RWMutex
+	appBuffer               *bq                 // from app , wait for send
+	sent                    map[uint16]*segment // sent segments
+	flushTimer              *time.Timer         // loopFlush not send data
+	swnd                    int64               // send window size , swnd = min(cwnd,rwnd)
+	cwnd                    int64               // congestion window size
+	rwnd                    int64               // receive window size
+	hSeq                    uint16              // current head seq , location is head
+	tSeq                    uint16              // current tail seq , location is tail
 	rttd, rtts, rto         time.Duration
 	sendFinish, closeSignal chan struct{}
 	logger                  logger.Logger
 	SegmentSender           SegmentSender
 	FTag                    string
-	s                       string
-	startUpT                *time.Timer
-	incT                    *time.Timer
-	decT                    *time.Timer
+	bbr                     *bbr.BBR
 }
 
 // Write
@@ -227,71 +194,27 @@ func (s *SWND) quickResend(seq uint16) (err error) {
 	return nil
 }
 
-// bdp
-func (s *SWND) bdp() (n int64) {
-	btlBw := s.btlBw.Get()
-	rtprop := s.rtprop.Get()
-	bdp := int64(btlBw * float64(rtprop/time.Millisecond))
-	//s.logger.Info("SWND : rtprop is :", rtprop, ", btlBw is :", btlBw, ", bdp is :", bdp)
-	return bdp
+// inflight
+func (s *SWND) inflight() (i int64) {
+	return int64(len(s.sent))
 }
 
-// bdp
-func (s *SWND) setCWND(n int64) {
+// setCWND
+func (s *SWND) setCWND(n int64) (c int64) {
 	s.cwnd = n
-	s.cwnd = _maxi64(s.cwnd, minCongWinSize)
-	s.cwnd = _mini64(s.cwnd, maxCongWinSize)
 	s.comSendWinSize()
+	return s.cwnd
 }
 
 // segmentEvent
 func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 	switch e {
 	case EventEnd:
-		rtt := ec.seg.RTT()
-		s.btlBw.Com()
-		s.rtprop.Com(rtt)
+		seg := ec.seg
+		rtt := seg.RTT()
 		s.comRTO(rtt)
-		switch s.s {
-		case StatusStartUp:
-			st := time.Now()
-			btlBw := s.btlBw.Get()
-			rtprop := s.rtprop.Get()
-			select {
-			case <-s.startUpT.C:
-				s.s = StatusStable
-				s.setCWND(s.bdp())
-			default:
-				if s.lastBtlbw <= btlBw && s.lastRtprop >= rtprop {
-					s.setCWND(s.cwnd * 2) // slow start
-				}
-			}
-			s.lastBtlbw = btlBw
-			s.lastRtprop = rtprop
-			s.logger.Info("StatusStartUp : cwnd", s.cwnd, "rtt", rtt, "btlBw", btlBw, "rtprop", rtprop, "time", time.Now().Sub(st))
-		case StatusStable:
-			st := time.Now()
-			btlBw := s.btlBw.Get()
-			rtprop := s.rtprop.Get()
-			if s.lastBtlbw <= btlBw && s.lastRtprop >= rtprop {
-				//select {
-				//case <-s.incT.C:
-				s.setCWND(int64(float64(s.cwnd) * 1.25))
-				//s.incT.Reset(incTIme)
-				//default:
-				//}
-			} else {
-				//select {
-				//case <-s.decT.C:
-				s.setCWND(int64(float64(s.cwnd) * 0.75))
-				//s.decT.Reset(decTIme)
-				//default:
-				//}
-			}
-			s.logger.Info("StatusStable : cwnd", s.cwnd, "rtt", rtt, "lastBtlbw", s.lastBtlbw, "btlBw", btlBw, "lastRtprop", s.lastRtprop, "rtprop", rtprop, "time", time.Now().Sub(st))
-			s.lastBtlbw = btlBw
-			s.lastRtprop = rtprop
-		}
+		s.bbr.Update(int64(len(s.sent)), seg.RTT(), seg.RTTS(), seg.RTTE())
+		s.setCWND(s.bbr.GetCWND())
 		return nil
 	case EventQResend:
 		return nil
@@ -311,12 +234,10 @@ func (s *SWND) String() string {
 }
 func (s *SWND) init() {
 	s.Do(func() {
-		s.s = StatusStartUp
 		if s.FTag == "" {
 			s.FTag = "nil"
 		}
 		s.logger = loggerfac.GetLogger(s.String())
-		s.ssthresh = defSsthresh
 		s.tSeq = minSeqN
 		s.hSeq = s.tSeq
 		s.appBuffer = &bq{Size: appBufferSize}
@@ -324,21 +245,13 @@ func (s *SWND) init() {
 		s.flushTimer = time.NewTimer(clearReadySendInterval)
 		s.closeSignal = make(chan struct{})
 		s.sendFinish = make(chan struct{})
-		s.rtprop = &rtprop{
-			CS: s.closeSignal,
-		}
-		s.btlBw = &btlBw{
-			CS: s.closeSignal,
+		s.bbr = &bbr.BBR{
+			Logger: s.logger,
 		}
 		s.rwnd = defRecWinSize
-		s.cwnd = defCongWinSize
+		s.cwnd = s.bbr.GetCWND()
 		s.swnd = s.cwnd
 		s.rto = def_rto
-		s.rtts = def_rto
-		s.rttd = def_rto
-		s.startUpT = time.NewTimer(startUPTIme)
-		s.incT = time.NewTimer(incTIme)
-		s.decT = time.NewTimer(decTIme)
 		s.loopFlush()
 		s.loopPrint()
 	})
@@ -367,6 +280,7 @@ func (s *SWND) readMSS() (seg *segment) {
 	if s.appBuffer.Len() <= 0 {
 		return nil
 	}
+	//s.logger.Critical("swnd is",s.swnd)
 	if s.swnd-int64(len(s.sent)) <= 0 { // no enough win size to send todo
 		return nil
 	}
@@ -478,7 +392,8 @@ func (s *SWND) comRTO(rtt time.Duration) {
 	if s.rto > max_rto {
 		s.rto = max_rto
 	}
-	s.logger.Critical("comRTO : rtt",rtt,"rto",s.rto)
+	//s.rto=s.rtprop
+	//s.logger.Critical("comRTO : rtt", rtt, "rto", s.rto)
 }
 
 // flushLastSegment

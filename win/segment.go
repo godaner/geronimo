@@ -8,7 +8,7 @@ import (
 
 const (
 	//quickResendInterval = time.Duration(300) * time.Millisecond
-	maxTickerResendC = 25
+	maxTickerResendC = 15
 )
 const (
 	incrto = 1.5
@@ -108,6 +108,16 @@ func (s *segment) Bs() (bs []byte) {
 	//s.RLock()
 	//defer s.RUnlock()
 	return s.bs
+}
+func (s *segment) RTTS() (rtts time.Time) {
+	//s.RLock()
+	//defer s.RUnlock()
+	return s.rtts
+}
+func (s *segment) RTTE() (rtte time.Time) {
+	//s.RLock()
+	//defer s.RUnlock()
+	return s.rtte
 }
 func (s *segment) Seq() (seq uint16) {
 	//s.RLock()
