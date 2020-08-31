@@ -3,7 +3,7 @@ package v1
 import (
 	"bytes"
 	"encoding/binary"
-	rule "github.com/godaner/geronimo/rule"
+	rule "github.com/godaner/geronimo/protocol"
 )
 
 // Header

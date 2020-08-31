@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"github.com/godaner/geronimo/cipher"
-	rule "github.com/godaner/geronimo/rule"
+	rule "github.com/godaner/geronimo/protocol"
 )
 
 var ErrDecrypt = errors.New("decrypt err")

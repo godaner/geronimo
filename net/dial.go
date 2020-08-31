@@ -1,7 +1,7 @@
 package net
 
 import (
-	"github.com/godaner/geronimo/rule/fac"
+	"github.com/godaner/geronimo/protocol/fac"
 	"net"
 )
 

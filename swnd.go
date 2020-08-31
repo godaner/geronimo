@@ -1,9 +1,8 @@
-package win
+package geronimo
 
 import (
 	"errors"
 	"fmt"
-	"github.com/godaner/geronimo/bbr"
 	"github.com/godaner/logger"
 	loggerfac "github.com/godaner/logger/factory"
 	"math"
@@ -42,8 +41,8 @@ const (
 const (
 	rtts_a  = float64(0.125)
 	rttd_b  = float64(0.25)
-	min_rto = time.Duration(100) * time.Millisecond
-	max_rto = time.Duration(1000) * time.Millisecond
+	Min_rto = time.Duration(100) * time.Millisecond
+	Max_rto = time.Duration(1000) * time.Millisecond
 	def_rto = time.Duration(500) * time.Millisecond
 )
 const (
@@ -72,11 +71,11 @@ func init() {
 	if maxSeqN <= minSeqN {
 		panic("maxSeqN <= minSeqN")
 	}
-	if max_rto <= min_rto {
-		panic("max_rto <= min_rto")
+	if Max_rto <= Min_rto {
+		panic("Max_rto <= Min_rto")
 	}
-	if max_rto <= min_rto {
-		panic("max_rto <= min_rto")
+	if Max_rto <= Min_rto {
+		panic("Max_rto <= Min_rto")
 	}
 
 }
@@ -99,7 +98,7 @@ type SWND struct {
 	sync.RWMutex
 	writeLock               sync.RWMutex
 	appBuffer               *bq                 // from app , wait for send
-	sent                    map[uint16]*segment // sent segments
+	sent                    map[uint16]*Segment // sent segments
 	flushTimer              *time.Timer         // loopFlush not send data
 	swnd                    int64               // send window size , swnd = min(cwnd,rwnd)
 	cwnd                    int64               // congestion window size
@@ -109,9 +108,22 @@ type SWND struct {
 	rttd, rtts, rto         time.Duration
 	sendFinish, closeSignal chan struct{}
 	logger                  logger.Logger
-	SegmentSender           SegmentSender
+	SegmentSender           Sender
+	bbr                     *BBR
 	FTag                    string
-	bbr                     *bbr.BBR
+}
+
+func (s *SWND) BBR() (bbr *BBR) {
+	return s.bbr
+}
+func (s *SWND) RTO() (rto time.Duration) {
+	return s.rto
+}
+func (s *SWND) TSeq() (tSeq uint16) {
+	return s.tSeq
+}
+func (s *SWND) Logger() (logger logger.Logger) {
+	return s.logger
 }
 
 // Write
@@ -152,7 +164,7 @@ func (s *SWND) RecvAck(seq, ack, winSize uint16) (err error) {
 	s.Lock()
 	defer s.Unlock()
 	s.logger.Info("SWND : recv ack , seq is", seq, ", ack is [", ack, "] , appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd)
-	// ack segment
+	// ack Segment
 	seg := s.sent[seq]
 	if seg == nil {
 		return nil
@@ -162,14 +174,14 @@ func (s *SWND) RecvAck(seq, ack, winSize uint16) (err error) {
 		s.logger.Error("SWND : seg ack err , err is", err)
 		return err
 	}
-	// trim ack segment
+	// trim ack Segment
 	s.trimAckSeg()
 	err = s.send(s.readMSS)
 	if err != nil {
 		s.logger.Error("SWND : recv ack send err , err is", err)
 		return err
 	}
-	// try quick resend segment
+	// try quick resend Segment
 	err = s.quickResend(seq)
 	if err != nil {
 		s.logger.Error("SWND : quick resend err , err is", err)
@@ -207,13 +219,13 @@ func (s *SWND) setCWND(n int64) (c int64) {
 }
 
 // segmentEvent
-func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
+func (s *SWND) SegmentEvent(e Event, ec *EContext) (err error) {
 	switch e {
 	case EventEnd:
-		seg := ec.seg
+		seg := ec.Seg
 		rtt := seg.RTT()
 		s.comRTO(rtt)
-		s.bbr.Update(int64(len(s.sent)), seg.RTT(), seg.RTTS(), seg.RTTE())
+		s.bbr.Update(int64(len(s.sent)), seg)
 		s.setCWND(s.bbr.GetCWND())
 		return nil
 	case EventQResend:
@@ -221,7 +233,7 @@ func (s *SWND) segmentEvent(e event, ec *eContext) (err error) {
 	case EventTickerResend:
 		return nil
 	}
-	panic("error segment event")
+	panic("error Segment event")
 	return nil
 }
 
@@ -241,11 +253,11 @@ func (s *SWND) init() {
 		s.tSeq = minSeqN
 		s.hSeq = s.tSeq
 		s.appBuffer = &bq{Size: appBufferSize}
-		s.sent = make(map[uint16]*segment)
+		s.sent = make(map[uint16]*Segment)
 		s.flushTimer = time.NewTimer(clearReadySendInterval)
 		s.closeSignal = make(chan struct{})
 		s.sendFinish = make(chan struct{})
-		s.bbr = &bbr.BBR{
+		s.bbr = &BBR{
 			Logger: s.logger,
 		}
 		s.rwnd = defRecWinSize
@@ -272,11 +284,11 @@ func (s *SWND) trimAckSeg() {
 }
 
 // segmentReader
-type segmentReader func() (seg *segment)
+type segmentReader func() (seg *Segment)
 
 // readMSS
 //  implement segmentReader
-func (s *SWND) readMSS() (seg *segment) {
+func (s *SWND) readMSS() (seg *Segment) {
 	if s.appBuffer.Len() <= 0 {
 		return nil
 	}
@@ -300,7 +312,7 @@ func (s *SWND) readMSS() (seg *segment) {
 
 // readAny
 //  implement segmentReader
-func (s *SWND) readAny() (seg *segment) {
+func (s *SWND) readAny() (seg *Segment) {
 	if s.appBuffer.Len() <= 0 {
 		return nil
 	}
@@ -325,7 +337,7 @@ func (s *SWND) send(sr segmentReader) (err error) {
 		// inc seq
 		s.tSeq++
 		// send
-		s.logger.Info("SWND : segment send , seq is [", seg.Seq(), "] , segment len is", len(seg.Bs()), ", appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd, ", rto is", int64(s.rto))
+		s.logger.Info("SWND : Segment send , seq is [", seg.Seq(), "] , Segment len is", len(seg.Bs()), ", appBuffer len is", s.appBuffer.Len(), ", sent len is", len(s.sent), ", send win size is", s.swnd, ", cong win size is", s.cwnd, ", recv win size is", s.rwnd, ", rto is", int64(s.rto))
 		err := seg.Send()
 		if err != nil {
 			return err
@@ -386,11 +398,11 @@ func (s *SWND) comRTO(rtt time.Duration) {
 	s.rtts = time.Duration((1-rtts_a)*float64(s.rtts) + rtts_a*rttf)
 	s.rttd = time.Duration((1-rttd_b)*float64(s.rttd) + rttd_b*math.Abs(rttf-float64(s.rtts)))
 	s.rto = s.rtts + 4*s.rttd
-	if s.rto < min_rto {
-		s.rto = min_rto
+	if s.rto < Min_rto {
+		s.rto = Min_rto
 	}
-	if s.rto > max_rto {
-		s.rto = max_rto
+	if s.rto > Max_rto {
+		s.rto = Max_rto
 	}
 	//s.rto=s.rtprop
 	//s.logger.Critical("comRTO : rtt", rtt, "rto", s.rto)
@@ -464,7 +476,7 @@ func (s *SWND) loopPrint() {
 // getTryResendSeqs
 func (s *SWND) getTryResendSeqs(seq uint16) (seqs []uint16) {
 	seqIndex := -1
-	// sent segment seqs
+	// sent Segment seqs
 	index := 0
 	for sentSeq := s.hSeq; sentSeq != s.tSeq; sentSeq++ {
 		seqs = append(seqs, sentSeq)
@@ -479,7 +491,7 @@ func (s *SWND) getTryResendSeqs(seq uint16) (seqs []uint16) {
 	}
 	if seqIndex < quickResendIfSkipGEN {
 		// 0 1 2
-		return nil // no segment need quick resend
+		return nil // no Segment need quick resend
 	}
 	//s.logger.Infof("getTryResendSeqs : seq is : %v seqIndex is : %v , seqs is %v , end seqs is : %v ", seq, seqIndex, seqs, seqs[:seqIndex-quickResendIfSkipGEN+1])
 	return seqs[:seqIndex-quickResendIfSkipGEN+1]

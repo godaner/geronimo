@@ -1,4 +1,4 @@
-package bbr
+package geronimo
 
 import (
 	"github.com/godaner/logger"
@@ -10,7 +10,7 @@ import (
 const (
 	maxCongWinSize = 32
 	minCongWinSize = 1
-	startUpWinSize = 1
+	startUpWinSize = 4
 	probRTTWinSize = 4
 )
 const (
@@ -21,7 +21,7 @@ const (
 )
 
 const (
-	bbrStartUpGain = 2
+	bbrStartUpGain = 4
 	bbrDrainGain   = 2
 	bbrProbRTTGain = 3
 	bbrProbBWGain  = 1.25
@@ -70,23 +70,25 @@ func init() {
 // BBR
 type BBR struct {
 	sync.Once
-	minRttUs                 time.Duration /* min RTT in min_rtt_win_sec window */
-	minRttStamp              time.Time     /* timestamp of min_rtt_us */
-	probeRttDoneStamp        time.Time     /* end time for BBR_PROBE_RTT mode */
-	bw                       minMax        /* Max recent delivery rate in pkts/uS << 24 */
-	fullBwCnt                uint8
-	fullBw                   float64
-	sts                      int
-	cwnd                     int64
-	bdp                      int64
-	cPacing                  uint8
-	drateSStamp, drateEStamp time.Time
-	drate                    float64
-	drateD                   uint16
-	probBWMaxBDP             int64
-	probBWMinRTT             time.Duration
+	minRttUs          time.Duration /* min RTT in min_rtt_win_sec window */
+	minRttStamp       time.Time     /* timestamp of min_rtt_us */
+	probeRttDoneStamp time.Time     /* end time for BBR_PROBE_RTT mode */
+	bw                minMax        /* Max recent delivery rate in pkts/uS << 24 */
+	fullBwCnt         uint8
+	fullBw            float64
+	sts               int
+	cwnd              int64
+	bdp               int64
+	cPacing           uint8
+	//drateSStamp, drateEStamp time.Time
+	//drate                    float64
+	//drateD                   uint16
+	probBWMaxBDP int64
+	probBWMinRTT time.Duration
 	//probRTTStart             bool
-	Logger logger.Logger
+	delivered     int64
+	deliveredTime time.Time
+	Logger        logger.Logger
 }
 
 func (b *BBR) init() {
@@ -179,6 +181,7 @@ func (b *BBR) GetCWND() (cwnd int64) {
 	return b.cwnd
 }
 
+/*
 // setDRate
 func (b *BBR) setDRate(s, e time.Time) (bw float64) {
 	//b.Logger.Critical("setDRate : drate is", b.drate, "drateD is", b.drateD, "drateSStamp is", b.drateSStamp, "drateEStamp is", b.drateEStamp, "s is", s, "e is", e)
@@ -213,22 +216,23 @@ func (b *BBR) setDRate(s, e time.Time) (bw float64) {
 func (b *BBR) getDRate() (c float64) {
 	return b.drate
 }
-
+*/
 // Update
-func (b *BBR) Update(inflight int64, rttus time.Duration, s, e time.Time) {
+func (b *BBR) Update(inflight int64, seg *Segment) {
 	b.init()
+	b.delivered++
 	switch b.sts {
 	case statusStartUp:
-		bw := b.setDRate(s, e)
+		dr := b.deliveryRate(seg)
 		obw := b.getMaxBW()
-		b.setBw(bw)
-		expired := b.setMinRttUs(rttus)
+		b.setBw(dr)
+		expired := b.setMinRttUs(seg.RTT())
 		if expired { //cong
 			b.Logger.Critical("setStatusStartUp : end , into setStatusProbRTT ")
 			b.setStatusProbRTT()
 			return
 		}
-		b.Logger.Critical("setStatusStartUp : bw is", bw, "maxbw is", b.getMaxBW(), "fullbwcnt is", b.fullBwCnt, "rtt is", rttus, "minrtt is", b.minRttUs)
+		b.Logger.Critical("setStatusStartUp : dr is", dr, "maxbw is", b.getMaxBW(), "fullbwcnt is", b.fullBwCnt, "rtt is", seg.RTT(), "minrtt is", b.minRttUs)
 		b.checkFullBwReached()
 		if b.fullBwReached() {
 			b.markBDP()
@@ -236,16 +240,16 @@ func (b *BBR) Update(inflight int64, rttus time.Duration, s, e time.Time) {
 			b.setStatusDrain()
 			return
 		}
-		if b.getMaxBW() >= obw {
+		if b.getMaxBW() > obw {
 			b.setCWND(b.cwnd * bbrStartUpGain)
 		}
 		b.Logger.Critical("setStatusStartUp : cwnd is", b.cwnd)
 		return
 	case statusDrain:
 		b.Logger.Critical("setStatusDrain : inflight is", inflight, "bdp is", b.getBdp())
-		bw := b.setDRate(s, e)
-		b.setBw(bw)
-		expired := b.setMinRttUs(rttus)
+		dr := b.deliveryRate(seg)
+		b.setBw(dr)
+		expired := b.setMinRttUs(seg.RTT())
 		//b.markBDP()
 		if expired { //cong
 			b.Logger.Critical("setStatusDrain : end , into setStatusProbRTT ")
@@ -258,9 +262,9 @@ func (b *BBR) Update(inflight int64, rttus time.Duration, s, e time.Time) {
 		b.Logger.Critical("setStatusDrain : end , into setStatusProbBW , bdp is ", b.getBdp())
 		b.setStatusProbBW()
 	case statusProbBW:
-		bw := b.setDRate(s, e)
-		b.setBw(bw)
-		expired := b.setMinRttUs(rttus)
+		dr := b.deliveryRate(seg)
+		b.setBw(dr)
+		expired := b.setMinRttUs(seg.RTT())
 		b.markBDP()
 		if expired { //cong
 			b.Logger.Critical("setStatusProbBW : end , into setStatusProbRTT ")
@@ -285,9 +289,9 @@ func (b *BBR) Update(inflight int64, rttus time.Duration, s, e time.Time) {
 		b.cPacing++
 		b.Logger.Critical("setStatusProbBW : , b.cwnd is ", b.cwnd)
 	case statusProbRTT:
-		b.setMinRttUs(rttus)
-		bw := b.setDRate(s, e)
-		b.setBw(bw)
+		dr := b.deliveryRate(seg)
+		b.setBw(dr)
+		b.setMinRttUs(seg.RTT())
 		b.checkFullBwReached()
 		b.Logger.Critical("setStatusProbRTT : ")
 		if b.probeRttDoneStamp.After(time.Now()) {
@@ -360,16 +364,19 @@ func (b *BBR) resetMinRtt() {
 	b.minRttUs = 0
 	b.minRttStamp = time.Time{}
 }
-func _maxi64(a, b int64) (c int64) {
-	if a > b {
-		return a
 
-	}
-	return b
+func (b *BBR) deliveryRate(seg *Segment) float64 {
+	b.deliveredTime = time.Now() // last ack time
+	return float64(b.delivered-seg.Delivered()) / (float64(b.deliveredTime.Sub(seg.DeliveredTime())) / float64(time.Millisecond))
+	//return float64(b.delivered-seg.Delivered()) / float64(time.Now().Sub(seg.DeliveredTime()))
 }
-func _mini64(a, b int64) (c int64) {
-	if a > b {
-		return b
+
+func (b *BBR) Delivered() (d int64) {
+	return b.delivered
+}
+func (b *BBR) DeliveredTime() (dt time.Time) {
+	if b.deliveredTime.IsZero() {
+		b.deliveredTime = time.Now()
 	}
-	return a
+	return b.deliveredTime
 }

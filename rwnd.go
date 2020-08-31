@@ -1,4 +1,4 @@
-package win
+package geronimo
 
 import (
 	"errors"
@@ -36,7 +36,7 @@ type RWND struct {
 	rwnd        int64
 	readLock    sync.RWMutex
 	appBuffer   *bq                 // to app
-	recved      map[uint16]*segment // received segment
+	recved      map[uint16]*Segment // received Segment
 	tailSeq     uint16              // current tail seq , location is tail
 	closeSignal chan struct{}
 	logger      logger.Logger
@@ -86,11 +86,11 @@ func (r *RWND) Recv(seqN uint16, bs []byte) (err error) {
 	default:
 	}
 	// illegal seq ?
-	r.logger.Info("RWND : recv seq is [", seqN, "] , segment len is", len(bs),", tailSeq is",r.tailSeq)
+	r.logger.Info("RWND : recv seq is [", seqN, "] , Segment len is", len(bs),", tailSeq is",r.tailSeq)
 	if !r.legalSeqN(seqN) {
 		return
 	}
-	// receive the segment
+	// receive the Segment
 	r.recv(NewRSegment(seqN, bs))
 	return
 }
@@ -105,7 +105,7 @@ func (r *RWND) init() {
 		r.logger = loggerfac.GetLogger(r.String())
 		r.tailSeq = minSeqN
 		r.appBuffer = &bq{Size: appBufferSize}
-		r.recved = make(map[uint16]*segment)
+		r.recved = make(map[uint16]*Segment)
 		r.closeSignal = make(chan struct{})
 		r.rwnd = defRecWinSize
 		r.loopPrint()
@@ -113,13 +113,13 @@ func (r *RWND) init() {
 }
 
 // recv
-func (r *RWND) recv(rs *segment) {
+func (r *RWND) recv(rs *Segment) {
 	defer func() {
 		r.ack(rs.seq, nil)
 	}()
 	// put it to receved
 	r.recved[rs.seq] = rs
-	// push received segment data to app
+	// push received Segment data to app
 	for {
 		if r.recved2AppBuffer() {
 			return
@@ -133,14 +133,14 @@ func (r *RWND) recved2AppBuffer() (breakk bool) {
 	if seg == nil {
 		return true
 	}
-	// put segment data to application buffer
+	// put Segment data to application buffer
 	// maybe closed , no consumer will block
 	err := r.appBuffer.BlockPushWithSignal(nil, r.closeSignal, make(<-chan time.Time), seg.Bs()...)
 	if err != nil {
 		r.logger.Error("RWND : recved to appBuffer err , err is", err.Error())
 		return true
 	}
-	// delete segment
+	// delete Segment
 	delete(r.recved, r.tailSeq)
 	seg = nil
 	// slide window , next seq

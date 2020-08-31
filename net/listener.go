@@ -3,9 +3,9 @@ package net
 import (
 	"errors"
 	"fmt"
-	"github.com/godaner/geronimo/rule"
-	msg "github.com/godaner/geronimo/rule"
-	"github.com/godaner/geronimo/rule/fac"
+	"github.com/godaner/geronimo/protocol"
+	msg "github.com/godaner/geronimo/protocol"
+	"github.com/godaner/geronimo/protocol/fac"
 	"github.com/godaner/logger"
 	loggerfac "github.com/godaner/logger/factory"
 	"net"
@@ -91,7 +91,7 @@ func (g *GListener) init() {
 					}
 					gcI, _ := g.gcs.Load(rAddr.String())
 					gc, _ := gcI.(*GConn)
-					if gc == nil && m1.Flag()&rule.FlagSYN1 == rule.FlagSYN1 {
+					if gc == nil && m1.Flag()&protocol.FlagSYN1 == protocol.FlagSYN1 {
 						// first connect
 						gc = &GConn{
 							UDPConn: g.c,

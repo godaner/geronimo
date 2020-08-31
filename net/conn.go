@@ -3,10 +3,10 @@ package net
 import (
 	"errors"
 	"fmt"
-	"github.com/godaner/geronimo/rule"
-	msg "github.com/godaner/geronimo/rule"
-	"github.com/godaner/geronimo/rule/fac"
-	"github.com/godaner/geronimo/win"
+	"github.com/godaner/geronimo"
+	"github.com/godaner/geronimo/protocol"
+	msg "github.com/godaner/geronimo/protocol"
+	"github.com/godaner/geronimo/protocol/fac"
 	"github.com/godaner/logger"
 	loggerfac "github.com/godaner/logger/factory"
 	"github.com/looplab/fsm"
@@ -72,8 +72,8 @@ type GConn struct {
 	*net.UDPConn
 	initOnce, toAcceptOnce, keepaliveOnce, initSendWinOnce, initRecvWinOnce, initLoopReadUDPOnce sync.Once
 	f                                                                                            uint8
-	recvWin                                                                                      *win.RWND
-	sendWin                                                                                      *win.SWND
+	recvWin                                                                                      *geronimo.RWND
+	sendWin                                                                                      *geronimo.SWND
 	raddr                                                                                        *GAddr
 	laddr                                                                                        *GAddr
 	lis                                                                                          *GListener
@@ -157,17 +157,17 @@ func (g *GConn) init() {
 		// init message handlers
 		g.mhs = map[uint16]messageHandler{
 			// syn
-			rule.FlagSYN1: g.syn1MessageHandler,
-			rule.FlagSYN2: g.syn2MessageHandler,
+			protocol.FlagSYN1: g.syn1MessageHandler,
+			protocol.FlagSYN2: g.syn2MessageHandler,
 			// fin
-			rule.FlagFIN1: g.fin1MessageHandler,
-			rule.FlagFIN2: g.fin2MessageHandler,
+			protocol.FlagFIN1: g.fin1MessageHandler,
+			protocol.FlagFIN2: g.fin2MessageHandler,
 			// body
-			rule.FlagPAYLOAD: g.payloadMessageHandler,
+			protocol.FlagPAYLOAD: g.payloadMessageHandler,
 			// ack
-			rule.FlagACK: g.ackMessageHandler,
+			protocol.FlagACK: g.ackMessageHandler,
 			// keepalive
-			rule.FlagKeepAlive: g.keepaliveMessageHandler,
+			protocol.FlagKeepAlive: g.keepaliveMessageHandler,
 		}
 		// fsm
 		g.fsm = fsm.NewFSM(
@@ -398,7 +398,7 @@ func (g *GConn) initWin() {
 // initRecvWin
 func (g *GConn) initRecvWin() {
 	g.initRecvWinOnce.Do(func() {
-		g.recvWin = &win.RWND{
+		g.recvWin = &geronimo.RWND{
 			FTag: g.String(),
 			AckSender: func(seq, ack, receiveWinSize uint16) (err error) {
 				m := g.MsgFac.New()
@@ -412,7 +412,7 @@ func (g *GConn) initRecvWin() {
 // initSendWin
 func (g *GConn) initSendWin() {
 	g.initSendWinOnce.Do(func() {
-		g.sendWin = &win.SWND{
+		g.sendWin = &geronimo.SWND{
 			FTag: g.String(),
 			SegmentSender: func(seq uint16, bs []byte) (err error) {
 				// send udp

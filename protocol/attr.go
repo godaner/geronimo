@@ -1,4 +1,4 @@
-package rule
+package protocol
 type Attr interface {
 	T() byte
 	L() uint16

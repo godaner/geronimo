@@ -2,8 +2,8 @@ package net
 
 import (
 	"errors"
-	"github.com/godaner/geronimo/rule"
-	msg "github.com/godaner/geronimo/rule"
+	"github.com/godaner/geronimo/protocol"
+	msg "github.com/godaner/geronimo/protocol"
 	"time"
 )
 
@@ -86,7 +86,7 @@ func (g *GConn) payloadMessageHandler(m msg.Message) (err error) {
 		g.Close()
 		return
 	}
-	return g.recvWin.Recv(m.SeqN(), m.AttributeByType(rule.AttrPAYLOAD))
+	return g.recvWin.Recv(m.SeqN(), m.AttributeByType(protocol.AttrPAYLOAD))
 }
 
 // keepaliveMessageHandler

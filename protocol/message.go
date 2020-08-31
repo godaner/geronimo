@@ -1,4 +1,4 @@
-package rule
+package protocol
 
 type Message interface {
 	UnMarshall(message []byte) (err error)

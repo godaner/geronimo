@@ -1,4 +1,4 @@
-package rule
+package protocol
 
 const (
 	FlagSYN1 = 1 << iota

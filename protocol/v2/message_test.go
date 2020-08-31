@@ -2,7 +2,7 @@ package v2
 
 import (
 	"bytes"
-	"github.com/godaner/geronimo/rule"
+	"github.com/godaner/geronimo/protocol"
 	. "github.com/smartystreets/goconvey/convey"
 	"testing"
 )
@@ -23,7 +23,7 @@ func TestMessage_ACK(t *testing.T) {
 		err := m1.UnMarshall(bs)
 		So(err, ShouldBeNil)
 		So(seqN, ShouldEqual, m1.SeqN())
-		So(rule.FlagACK, ShouldEqual, m1.Flag())
+		So(protocol.FlagACK, ShouldEqual, m1.Flag())
 		So(ackN, ShouldEqual, m1.AckN())
 		So(winSize, ShouldEqual, m1.WinSize())
 		bs1 := m1.Marshall()
@@ -48,9 +48,9 @@ func TestMessage_PAYLOAD(t *testing.T) {
 		m1 := &Message{}
 		err := m1.UnMarshall(bs)
 		So(err, ShouldBeNil)
-		So(string(m1.AttributeByType(rule.AttrPAYLOAD)), ShouldEqual, string(payload))
+		So(string(m1.AttributeByType(protocol.AttrPAYLOAD)), ShouldEqual, string(payload))
 		So(seqN, ShouldEqual, m1.SeqN())
-		So(rule.FlagPAYLOAD, ShouldEqual, m1.Flag())
+		So(protocol.FlagPAYLOAD, ShouldEqual, m1.Flag())
 		So(ackN, ShouldEqual, m1.AckN())
 		So(winSize, ShouldEqual, m1.WinSize())
 		bs1 := m1.Marshall()

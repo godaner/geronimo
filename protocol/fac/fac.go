@@ -2,9 +2,9 @@ package fac
 
 import (
 	"github.com/godaner/geronimo/cipher"
-	"github.com/godaner/geronimo/rule"
-	v1 "github.com/godaner/geronimo/rule/v1"
-	v2 "github.com/godaner/geronimo/rule/v2"
+	"github.com/godaner/geronimo/protocol"
+	v1 "github.com/godaner/geronimo/protocol/v1"
+	v2 "github.com/godaner/geronimo/protocol/v2"
 	"strings"
 	"sync"
 )
@@ -12,13 +12,13 @@ import (
 type Fac struct {
 	sync.Once
 	Enc string
-	new func() (m rule.Message)
+	new func() (m protocol.Message)
 }
 
 func (e *Fac) init() {
 	e.Do(func() {
 		if e.Enc == "" {
-			e.new = func() (m rule.Message) {
+			e.new = func() (m protocol.Message) {
 				return &v1.Message{}
 			}
 			return
@@ -32,14 +32,14 @@ func (e *Fac) init() {
 		if err != nil {
 			panic(err)
 		}
-		e.new = func() (m rule.Message) {
+		e.new = func() (m protocol.Message) {
 			return &v2.Message{
 				C: c,
 			}
 		}
 	})
 }
-func (e *Fac) New() (m rule.Message) {
+func (e *Fac) New() (m protocol.Message) {
 	e.init()
 	return e.new()
 }
