@@ -187,6 +187,12 @@ func (s *SWND) RecvAck(seq, ack, winSize uint16) (err error) {
 		s.logger.Error("SWND : quick resend err , err is", err)
 		return err
 	}
+	// bbr will update window
+	err = s.send(s.readMSS)
+	if err != nil {
+		s.logger.Error("SWND : recv ack send err , err is", err)
+		return err
+	}
 	return nil
 }
 

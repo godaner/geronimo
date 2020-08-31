@@ -11,14 +11,14 @@ const (
 	maxTickerResendC = 15
 )
 const (
-	incrto = 1.5
+	incrto = 0.5
 )
 const (
 	waitAckTo = time.Duration(10) * time.Second
 )
 
 var (
-	errResendTo = errors.New("Segment resend timeout")
+	errResendTo = errors.New("resend timeout")
 )
 
 const (
@@ -195,7 +195,7 @@ func (s *Segment) TryQResend() (err error) {
 	case <-s.qrt.C:
 		s.triggerQResend()
 		//s.qrt.Reset(quickResendInterval)
-		s.qrt.Reset(s.rto / 4)
+		s.qrt.Reset(s.s.RTO() / 4)
 		return nil
 	default:
 		return nil
@@ -263,7 +263,7 @@ func (s *Segment) setResend() {
 
 // incRTO
 func (s *Segment) incRTO() {
-	s.rto = time.Duration(float64(s.rto) * incrto)
+	s.rto = time.Duration(float64(s.rto) + float64(s.s.RTO())*incrto)
 	if s.rto < Min_rto {
 		s.rto = Min_rto
 	}
