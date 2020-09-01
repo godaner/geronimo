@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	maxCongWinSize = 32
+	maxCongWinSize = 64
 	minCongWinSize = 1
-	startUpWinSize = 1
+	startUpWinSize = 4
 	probRTTWinSize = 4
 )
 const (
@@ -21,7 +21,7 @@ const (
 )
 
 const (
-	bbrStartUpGain = 4
+	bbrStartUpGain = 3
 	//bbrDrainGain   = 2
 	//bbrProbRTTGain = 3
 	//bbrProbBWGain  = 1.25
@@ -42,7 +42,7 @@ const (
 	maxFullBwCnt = 3
 )
 const (
-	fullBwThresh = float64(1.25)
+	fullBwThresh = float64(1.1)
 )
 
 var bbrPacingGain = []float64{
@@ -84,7 +84,9 @@ type BBR struct {
 	probBWMaxBDP      int64
 	probBWMinRTT      time.Duration
 	delivered         int64
+	nextRttDelivered  int64
 	deliveredTime     time.Time
+	roundStart        bool
 	Logger            logger.Logger
 }
 
@@ -152,6 +154,9 @@ func (b *BBR) checkFullBwReached() {
 		b.Logger.Critical("checkFullBwReached : fullBwReached !!!!!!!")
 		return
 	}
+	if !b.roundStart {
+		return
+	}
 	if maxBw >= bwThresh {
 		b.fullBw = maxBw
 		b.fullBwCnt = 0
@@ -164,7 +169,7 @@ func (b *BBR) comBDP(minRtts time.Duration, maxBw float64) (bdp int64) {
 	return int64(math.Ceil((float64(minRtts) / float64(time.Millisecond)) * maxBw))
 }
 
-func (b *BBR) GetCWND() (cwnd int64) {
+func (b *BBR) CWND() (cwnd int64) {
 	b.init()
 	return b.cwnd
 }
@@ -172,7 +177,10 @@ func (b *BBR) GetCWND() (cwnd int64) {
 // Update
 func (b *BBR) Update(inflight int64, seg *Segment) {
 	b.init()
+	// delivered
 	b.delivered++
+	// check round start
+	b.checkRoundStart(seg)
 	// old
 	oBW := b.maxBW()
 	oMinRTT := b.minRttUs
@@ -196,7 +204,7 @@ func (b *BBR) Update(inflight int64, seg *Segment) {
 			b.setStatusDrain()
 			return
 		}
-		if b.maxBW() > oBW {
+		if b.maxBW() >= oBW*fullBwThresh {
 			b.setCWND(b.cwnd * bbrStartUpGain)
 		}
 		b.Logger.Critical("setStatusStartUp : cwnd is", b.cwnd)
@@ -327,4 +335,19 @@ func (b *BBR) DeliveredTime() (dt time.Time) {
 		b.deliveredTime = time.Now()
 	}
 	return b.deliveredTime
+}
+
+func (b *BBR) checkRoundStart(seg *Segment) {
+	//if (!before(rs->prior_delivered, bbr->next_rtt_delivered)) {
+	//	bbr->next_rtt_delivered = tp->delivered;
+	//	bbr->rtt_cnt++;
+	//	bbr->round_start = 1;
+	//	bbr->packet_conservation = 0;
+	//}
+	b.roundStart = false
+	if seg.delivered >= b.nextRttDelivered {
+		//b.nextRttDelivered = seg.delivered
+		b.nextRttDelivered = b.delivered
+		b.roundStart = true
+	}
 }
