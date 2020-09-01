@@ -42,8 +42,8 @@ const (
 	rtts_a  = float64(0.125)
 	rttd_b  = float64(0.25)
 	Min_rto = time.Duration(100) * time.Millisecond
-	Max_rto = time.Duration(1000) * time.Millisecond
-	def_rto = time.Duration(500) * time.Millisecond
+	Max_rto = time.Duration(10000) * time.Millisecond
+	def_rto = time.Duration(1000) * time.Millisecond
 )
 const (
 	// flush
@@ -53,9 +53,6 @@ const (
 )
 const (
 	clearReadySendInterval = time.Duration(10) * time.Millisecond
-)
-const (
-	defRecWinSize = 32
 )
 
 var (

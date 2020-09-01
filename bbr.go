@@ -8,7 +8,8 @@ import (
 )
 
 const (
-	maxCongWinSize = 64
+	defRecWinSize  = 512
+	maxCongWinSize = 512
 	minCongWinSize = 1
 	startUpWinSize = 4
 	probRTTWinSize = 4
@@ -48,7 +49,7 @@ const (
 var bbrPacingGain = []float64{
 	unit * 5.0 / 4.0, /* probe for more available bw */
 	//unit * 8.0 / 4.0, /* probe for more available bw */
-	unit * 3.0 / 4.0, /* drain queue and/or yield bw to other flows */
+	//unit * 3.0 / 4.0, /* drain queue and/or yield bw to other flows */
 	//unit * 1.0 / 2.0, /* drain queue and/or yield bw to other flows */
 	unit, unit, unit, /* cruise at 1.0*bw to utilize pipe, */
 	unit, unit, unit, /* without creating excess queue... */
@@ -145,13 +146,13 @@ func (b *BBR) checkFullBwReached() {
 
 	// 这里是一个简单的冒泡法，只要不是连续的带宽增长小于25%，那么就将计数“不增长阈值”加1，事不过三，超过三次，切换到DRAIN
 	bwThresh := b.fullBw * fullBwThresh
-	fb := b.fullBw
+	//fb := b.fullBw
 	maxBw := b.maxBW()
 	defer func() {
-		b.Logger.Critical("checkFullBwReached : fullBw is", fb, "maxBw is", maxBw, "bwThresh is", bwThresh, "fullBwCnt is", b.fullBwCnt)
+		//b.Logger.Critical("checkFullBwReached : fullBw is", fb, "maxBw is", maxBw, "bwThresh is", bwThresh, "fullBwCnt is", b.fullBwCnt)
 	}()
 	if b.fullBwReached() {
-		b.Logger.Critical("checkFullBwReached : fullBwReached !!!!!!!")
+		//b.Logger.Critical("checkFullBwReached : fullBwReached !!!!!!!")
 		return
 	}
 	if !b.roundStart {
@@ -188,43 +189,43 @@ func (b *BBR) Update(inflight int64, seg *Segment) {
 	dr := b.deliveryRate(seg)
 	b.updateBw(dr)
 	expired := b.setMinRtt(seg.RTT())
-	b.Logger.Critical("Update : rtt is ", seg.RTT())
+	//b.Logger.Critical("Update : rtt is ", seg.RTT())
 	switch b.sts {
 	case statusStartUp:
 		if expired { //cong
-			b.Logger.Critical("setStatusStartUp : end , into setStatusProbRTT ")
+			//b.Logger.Critical("setStatusStartUp : end , into setStatusProbRTT ")
 			b.setStatusProbRTT()
 			return
 		}
-		b.Logger.Critical("setStatusStartUp : dr is", dr, "maxbw is", b.maxBW(), "fullbwcnt is", b.fullBwCnt, "rtt is", seg.RTT(), "minrtt is", b.minRttUs)
+		//b.Logger.Critical("setStatusStartUp : dr is", dr, "maxbw is", b.maxBW(), "fullbwcnt is", b.fullBwCnt, "rtt is", seg.RTT(), "minrtt is", b.minRttUs)
 		b.checkFullBwReached()
 		if b.fullBwReached() {
 			//b.markBDP()
-			b.Logger.Critical("setStatusStartUp : end , into setStatusDrain , dbp is", b.comBDP(b.minRttUs, b.maxBW()), "maxxbw is", b.maxBW(), "minrtt is", b.minRttUs)
+			//b.Logger.Critical("setStatusStartUp : end , into setStatusDrain , dbp is", b.comBDP(b.minRttUs, b.maxBW()), "maxxbw is", b.maxBW(), "minrtt is", b.minRttUs)
 			b.setStatusDrain()
 			return
 		}
 		if b.maxBW() >= oBW*fullBwThresh {
 			b.setCWND(b.cwnd * bbrStartUpGain)
 		}
-		b.Logger.Critical("setStatusStartUp : cwnd is", b.cwnd)
+		//b.Logger.Critical("setStatusStartUp : cwnd is", b.cwnd)
 		return
 	case statusDrain:
 		b.setCWND(b.comBDP(b.minRttUs, b.maxBW()))
-		b.Logger.Critical("setStatusDrain : inflight is", inflight, "inbdp is", b.comBDP(oMinRTT, b.maxBW()), "cwnd bdp is", b.comBDP(b.minRttUs, b.maxBW()))
+		//b.Logger.Critical("setStatusDrain : inflight is", inflight, "inbdp is", b.comBDP(oMinRTT, b.maxBW()), "cwnd bdp is", b.comBDP(b.minRttUs, b.maxBW()))
 		if expired { //cong
-			b.Logger.Critical("setStatusDrain : end , into setStatusProbRTT ")
+			//b.Logger.Critical("setStatusDrain : end , into setStatusProbRTT ")
 			b.setStatusProbRTT()
 			return
 		}
 		if inflight > b.comBDP(oMinRTT, b.maxBW()) {
 			return
 		}
-		b.Logger.Critical("setStatusDrain : end , into setStatusProbBW , bdp is ", b.comBDP(b.minRttUs, b.maxBW()))
+		//b.Logger.Critical("setStatusDrain : end , into setStatusProbBW , bdp is ", b.comBDP(b.minRttUs, b.maxBW()))
 		b.setStatusProbBW()
 	case statusProbBW:
 		if expired { //cong
-			b.Logger.Critical("setStatusProbBW : end , into setStatusProbRTT ")
+			//b.Logger.Critical("setStatusProbBW : end , into setStatusProbRTT ")
 			b.setStatusProbRTT()
 			return
 		}
@@ -246,19 +247,19 @@ func (b *BBR) Update(inflight int64, seg *Segment) {
 		}
 		b.setCWND(int64(math.Ceil(float64(b.probBWMaxBDP) * bbrPacingGain[b.cPacing])))
 		b.cPacing++
-		b.Logger.Critical("setStatusProbBW : , b.cwnd is ", b.cwnd)
+		//b.Logger.Critical("setStatusProbBW : , b.cwnd is ", b.cwnd)
 	case statusProbRTT:
 		b.checkFullBwReached()
-		b.Logger.Critical("setStatusProbRTT : ")
+		//b.Logger.Critical("setStatusProbRTT : ")
 		if b.probeRttDoneStamp.After(time.Now()) {
 			return
 		}
 		if b.fullBwReached() {
 			//b.markBDP() // for setStatusProbBW
-			b.Logger.Critical("setStatusProbRTT : end , into setStatusProbBW ")
+			//b.Logger.Critical("setStatusProbRTT : end , into setStatusProbBW ")
 			b.setStatusProbBW()
 		} else {
-			b.Logger.Critical("setStatusProbRTT : end , into setStatusStartUp ")
+			//b.Logger.Critical("setStatusProbRTT : end , into setStatusStartUp ")
 			b.setStatusStartUp()
 		}
 		//b.setCWND(b.getBdp())
@@ -272,7 +273,7 @@ func (b *BBR) setStatusStartUp() {
 	// b.bw.reset(time.Now(), 0)
 	//b.resetMinRtt()
 	b.sts = statusStartUp
-	b.Logger.Critical("setStatusStartUp : start")
+	//b.Logger.Critical("setStatusStartUp : start")
 }
 
 // setStatusDrain
@@ -281,7 +282,7 @@ func (b *BBR) setStatusDrain() {
 	//b.setCWND(b.getBdp())
 	//b.resetMinRtt()
 	b.sts = statusDrain
-	b.Logger.Critical("setStatusDrain : start")
+	//b.Logger.Critical("setStatusDrain : start")
 }
 
 // setStatusProbBW
@@ -293,7 +294,7 @@ func (b *BBR) setStatusProbBW() {
 	// todo reset minrtts ??
 	//b.resetMinRtt()
 	b.sts = statusProbBW
-	b.Logger.Critical("setStatusProbBW : start")
+	//b.Logger.Critical("setStatusProbBW : start")
 }
 
 // setStatusProbRTT
@@ -305,7 +306,7 @@ func (b *BBR) setStatusProbRTT() {
 	// b.bw.reset(time.Now(), 0)
 	//b.resetMinRtt()
 	b.sts = statusProbRTT
-	b.Logger.Critical("setStatusProbRTT : start")
+	//b.Logger.Critical("setStatusProbRTT : start")
 }
 
 // setCWND
