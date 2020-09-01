@@ -58,7 +58,7 @@ var bbrPacingGain = []float64{
 func init() {
 	//if defCongWinSize > defRecWinSize {
 	//	panic("defCongWinSize > defRecWinSize")
-	//}
+	//}4
 	//if defCongWinSize > defRecWinSize {
 	//	panic("defCongWinSize > defRecWinSize")
 	//}
@@ -251,9 +251,12 @@ func (b *BBR) Update(inflight int64, seg *Segment) {
 	case statusProbRTT:
 		b.checkFullBwReached()
 		//b.Logger.Critical("setStatusProbRTT : ")
-		if b.probeRttDoneStamp.After(time.Now()) {
+		if !b.roundStart{
 			return
 		}
+		//if b.probeRttDoneStamp.After(time.Now()) {
+		//	return
+		//}
 		if b.fullBwReached() {
 			//b.markBDP() // for setStatusProbBW
 			//b.Logger.Critical("setStatusProbRTT : end , into setStatusProbBW ")
@@ -317,10 +320,10 @@ func (b *BBR) setCWND(n int64) (c int64) {
 	return b.cwnd
 }
 
-//func (b *BBR) resetMinRtt() {
-//	b.minRttUs = 0
-//	b.minRttStamp = time.Time{}
-//}
+func (b *BBR) resetMinRtt() {
+	b.minRttUs = 0
+	b.minRttStamp = time.Time{}
+}
 
 func (b *BBR) deliveryRate(seg *Segment) float64 {
 	b.deliveredTime = time.Now() // last ack time
