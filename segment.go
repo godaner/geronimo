@@ -83,8 +83,8 @@ func NewSSegment(s *SWND, bs []byte) (seg *Segment) {
 		qrt:           time.NewTimer(time.Duration(1) * time.Nanosecond),
 		rst:           nil,
 		rstt:          nil,
-		delivered:     s.BBR().Delivered(),
-		deliveredTime: s.BBR().DeliveredTime(), // last ack time
+		delivered:     s.BBR().Delivered(),// newest ack num
+		deliveredTime: s.BBR().DeliveredTime(), // newest ack time
 		//deliveredTime: time.Now(),
 		logger: logger,
 		es: func(e Event, ec *EContext) (err error) {

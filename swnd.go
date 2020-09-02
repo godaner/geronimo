@@ -42,8 +42,8 @@ const (
 	rtts_a  = float64(0.125)
 	rttd_b  = float64(0.25)
 	Min_rto = time.Duration(100) * time.Millisecond
-	Max_rto = time.Duration(10000) * time.Millisecond
-	def_rto = time.Duration(1000) * time.Millisecond
+	Max_rto = time.Duration(1000) * time.Millisecond
+	def_rto = time.Duration(500) * time.Millisecond
 )
 const (
 	// flush
@@ -54,6 +54,7 @@ const (
 const (
 	clearReadySendInterval = time.Duration(10) * time.Millisecond
 )
+
 
 var (
 	errSClosed      = errors.New("swnd closed")
@@ -93,7 +94,6 @@ func _mini64(a, b int64) (c int64) {
 type SWND struct {
 	sync.Once
 	sync.RWMutex
-	segEventLock            sync.RWMutex
 	writeLock               sync.RWMutex
 	appBuffer               *bq                 // from app , wait for send
 	sent                    map[uint16]*Segment // sent segments
@@ -172,13 +172,25 @@ func (s *SWND) RecvAck(seq, ack, winSize uint16) (err error) {
 		s.logger.Error("SWND : seg ack err , err is", err)
 		return err
 	}
+	// trim ack Segment
+	s.trimAckSeg()
+	err = s.send(s.readMSS)
+	if err != nil {
+		s.logger.Error("SWND : recv ack send err , err is", err)
+		return err
+	}
 	// try quick resend Segment
 	err = s.quickResend(seq)
 	if err != nil {
 		s.logger.Error("SWND : quick resend err , err is", err)
 		return err
 	}
-
+	// bbr will update window
+	err = s.send(s.readMSS)
+	if err != nil {
+		s.logger.Error("SWND : recv ack send err , err is", err)
+		return err
+	}
 	return nil
 }
 
@@ -212,24 +224,13 @@ func (s *SWND) setCWND(n int64) (c int64) {
 
 // segmentEvent
 func (s *SWND) SegmentEvent(e Event, ec *EContext) (err error) {
-	s.segEventLock.Lock()
-	defer s.segEventLock.Unlock()
 	switch e {
 	case EventEnd:
-		// trim ack Segment
-		s.trimAckSeg()
-		// rto
 		seg := ec.Seg
 		rtt := seg.RTT()
 		s.comRTO(rtt)
-		// bbr
 		s.bbr.Update(int64(len(s.sent)), seg)
 		s.setCWND(s.bbr.CWND())
-		err = s.send(s.readMSS)
-		if err != nil {
-			s.logger.Error("SWND : recv ack send err , err is", err)
-			return err
-		}
 		return nil
 	case EventQResend:
 		return nil
